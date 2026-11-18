@@ -54,6 +54,35 @@ def save(name, cells):
 
 
 # =====================================================================================
+# 00 本機遊玩（自己電腦：本機 LLM＋語音）
+# =====================================================================================
+nb0 = [
+    md('''
+# 🎮 笨笨掃地機｜在自己電腦上玩（本機 LLM＋🎤 語音）
+
+課程的 LLM 只在 JupyterHub 伺服器內部（`127.0.0.1:8000`），連 VPN 也連不到，所以在自己電腦上玩時改用**本機的 Qwen2.5-7B**
+（跟課程同一個模型）。Apple Silicon Mac 用 MLX 跑，24 GB 記憶體很夠，一句大約 3 秒。
+
+**先在終端機開好本機 LLM**（只要開一次，之後放著就好）：
+```bash
+pip install -r requirements.txt -r requirements-voice.txt mlx-lm
+mlx_lm.server --model mlx-community/Qwen2.5-7B-Instruct-4bit --port 8011     # 第一次會下載約 4 GB
+```
+然後用 `OPENAI_BASE_URL=http://127.0.0.1:8011/v1 OPENAI_API_KEY=local jupyter lab` 打開這本，執行下面那一格。
+網址是 `localhost`，所以瀏覽器會給麥克風：**按住 🎤 講話、放開送出**。
+'''),
+    code(SETUP),
+    code('''import os
+from bendan import llm, voice
+
+os.environ.setdefault("OPENAI_BASE_URL", "http://127.0.0.1:8011/v1")   # 本機 mlx_lm.server
+os.environ.setdefault("OPENAI_API_KEY", "local")
+llm.connect()                 # 會自動把 qwen2.5:7b 對到本機伺服器上的模型名稱
+voice.connect_stt()           # 本機 Whisper（第一次會下載模型）
+ui = bendan.play_widgets()    # 從還沒破的第一關開始；按右上角「🪟 彈出成獨立視窗」更像遊戲''', tags=["interactive"]),
+]
+
+# =====================================================================================
 # 01 快速開始
 # =====================================================================================
 nb1 = [
@@ -513,6 +542,7 @@ else:
 ]
 
 OUT.mkdir(parents=True, exist_ok=True)
+save("00_本機遊玩.ipynb", nb0)
 save("01_快速開始_遊玩.ipynb", nb1)
 save("02_Agent_原理展示.ipynb", nb2)
 save("03_評估.ipynb", nb3)
