@@ -109,6 +109,7 @@ class Session:
             self.n_commands = 0
             self.last_command = None
             self.last_tone = None
+            self.last_source = "text"       # "text"＝打字、"voice"＝語音（指令紀錄會標 🎤）
             self.result = None             # 關卡結算（結束後才有）
             self.new_achievements = []
             self.quotes = []               # 笨笨講過的話（結算時挑最好笑的）
@@ -172,7 +173,9 @@ class Session:
             out.append(("🏠", "最後要回充電座"))
         return out
 
-    def _new_entry(self, command, kind, say="", actions=(), flags=()):
+    def _new_entry(self, command, kind, say="", actions=(), flags=(), voice=False):
+        if voice:
+            flags = ["🎤 語音", *flags]
         entry = {"no": self.n_commands, "cmd": command, "kind": kind, "say": say,
                  "tone": self.last_tone.describe() if (self.last_tone and kind == "command") else "",
                  "plan": actions_to_text(list(actions)) if actions is not None else "",
@@ -190,7 +193,7 @@ class Session:
         return []
 
     # ---- 1) 玩家輸入的本地處理 ----
-    def preprocess(self, command):
+    def preprocess(self, command, source="text"):
         """回傳 {"handled": bool, "say": str, "events": [...], "refuse": bool}。handled=True 代表不用問 LLM。"""
         with self.lock:
             if self.game.over:
@@ -199,7 +202,7 @@ class Session:
             if self.game.over:
                 return {"handled": True, "say": "……來不及了。", "events": events, "refuse": False}
             tone = analyze_tone(command, self.last_command)
-            self.last_command, self.last_tone = command, tone
+            self.last_command, self.last_tone, self.last_source = command, tone, source
             if self.gameplay:
                 self.tone_counts.update(tone.tags)
                 tone_ev = []
@@ -214,7 +217,8 @@ class Session:
             if self.game.over:
                 return {"handled": True, "say": "……", "events": events, "refuse": False}
         if STOP_RE.fullmatch(command):            # 保底動作：「停」直接處理，不等 LLM
-            return {"handled": True, "say": "收到！緊急煞車！", "events": events + self.stop(command), "refuse": False}
+            return {"handled": True, "say": "收到！緊急煞車！", "events": events + self.stop(command, source=source),
+                    "refuse": False}
         if GO_HOME_RE.fullmatch(command):         # 保底動作：「回充」也直接處理
             res = {"actions": [{"op": "return_home"}], "say": "好啦，回家充電。", "ok": True, "format_ok": True,
                    "raws": [], "latency": 0.0}
@@ -224,7 +228,7 @@ class Session:
                   and self.mood.should_refuse(self.rng))
         return {"handled": False, "say": "", "events": events, "refuse": refuse}
 
-    def stop(self, command="停"):
+    def stop(self, command="停", source="button"):
         with self.lock:
             self.game.queue.clear()
             ev = E("stopped", "收到「停」，動作佇列已清空。")
@@ -234,7 +238,7 @@ class Session:
                 self.current["events"].append(ev)
                 self._finish()
             self.pending_feedback = None
-            entry = self._new_entry(command, "stop", "收到！緊急煞車！", [])
+            entry = self._new_entry(command, "stop", "收到！緊急煞車！", [], voice=source == "voice")
             entry.update(plan="（緊急煞車）", done=True)
             self._log({"kind": "local_stop", "command": command})
         return [ev]
@@ -296,7 +300,8 @@ class Session:
             if result.get("dazed"):
                 flags.append("😵 當機")
             label = "（回報）" if kind == "feedback" else command
-            entry = self._new_entry(label, kind, result.get("say", ""), result["actions"], flags)
+            voice = kind in ("command", "home") and self.last_source == "voice"
+            entry = self._new_entry(label, kind, result.get("say", ""), result["actions"], flags, voice=voice)
             self.current = {"command": command, "kind": kind, "depth": depth, "result": result, "events": [],
                             "entry": entry}
             if result.get("refused"):

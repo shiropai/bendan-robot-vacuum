@@ -41,7 +41,7 @@ class Memory:
 
 
 _ROOM_RE = "|".join(sorted(set(KNOWN_ROOMS) | set(ROOM_ALIASES), key=len, reverse=True))
-FORBID_RE = re.compile(rf"(不准|不要|別|禁止|不可以|不能|不許)\s*再?\s*(進入|進去|跑進|跑去|靠近|進|去|到)?\s*(?P<room>{_ROOM_RE})")
+FORBID_RE = re.compile(rf"(不准|不準|不要|別|禁止|不可以|不能|不許)\s*再?\s*(進入|進去|跑進|跑去|靠近|進|去|到)?\s*(?P<room>{_ROOM_RE})")
 ALLOW_RE = re.compile(rf"(?<!不)(可以|准|允許)\s*(進入|進去|進|去)\s*(?P<room>{_ROOM_RE})")
 
 

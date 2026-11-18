@@ -17,8 +17,13 @@
   實測課程 JupyterHub（JupyterLab 4.6、ipywidgets 8）：只有 widgets 擴充套件、沒有 jupyter-server-proxy／voila，
   所以沒辦法另開一個網頁伺服器；這是不用裝東西就能做到「彈出式遊戲視窗」的方法。
 - 鍵盤：Enter 送出（中文輸入法選字時不會誤送）、Esc＝停！、↑／↓ 叫出之前講過的指令；點指令紀錄可以把那句放回輸入框。
-- 🎤 語音輸入：Chrome 的 Web Speech API。課程 JupyterHub 是 http，瀏覽器不給麥克風（實測 `not-allowed`），
-  按下去會顯示替代方案（電腦內建聽寫）。評估見 `docs/voice_input.md`。
+- 🎤 語音輸入：
+  - 有 Whisper（`bendan.voice`，在自己電腦上跑）：**按住 🎤 講話、放開送出**（只點一下＝開始錄，再點一下結束）。
+    瀏覽器錄 16 kHz WAV → 透過一個隱藏的 widget 交給 Python → Whisper 在背景執行緒轉文字 → 當成指令送出。
+    用吼的（音量很大）會被當成「大吼」，笨笨會不開心。
+  - 沒有 Whisper：改用 Chrome 的 Web Speech API。
+  - 兩種都需要「安全來源」（https 或 localhost）。課程 JupyterHub 是 http，瀏覽器不給麥克風（實測 `not-allowed`），
+    按下去會顯示替代方案（電腦內建聽寫）。評估與設定見 `docs/voice_input.md`。
 """
 import html
 import json
@@ -26,15 +31,18 @@ import random
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 from ..gameplay.progress import Progress
 from ..gameplay.scoring import stars_text
 from ..render import bubble_html, history_html, render_svg, side_html
 from ..session import EXECUTOR, Session
+from ..world.constants import E
 from ..world.levels import CAMPAIGN, level_title
 from .commands import COAX_LINES, HELP, change_level, handle_slash, next_level
 
 _ACTIVE_UI = None
+STT_EXECUTOR = ThreadPoolExecutor(max_workers=1)     # 語音辨識另外一條執行緒，不跟 LLM 搶
 
 MIC_HELP = (
     "🎤 <b>瀏覽器不給麥克風權限</b>：課程 JupyterHub 是 http（不是 https），Chrome 只在安全連線開放麥克風。<br>"
@@ -105,7 +113,10 @@ var tries = 0;
     if (text !== undefined) i.value = text;
     if (!i.value.trim()) return;
     hist.push(i.value); hpos = hist.length;
-    i.dispatchEvent(new Event('change', { bubbles: true }));   // ipywidgets 收到 change 才會同步到 Python
+    // ipywidgets 收到 change 才會同步到 Python；先送空字串再送內容，同一句話（例如語音填進來的）也能再送一次
+    var v = i.value;
+    i.value = ''; i.dispatchEvent(new Event('change', { bubbles: true }));
+    i.value = v; i.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   root.addEventListener('keydown', function (e) {
@@ -128,7 +139,7 @@ var tries = 0;
       if (act === 'popout') popout();
       else if (act === 'dock') dock(false);
       else if (act === 'fullscreen') fullscreen();
-      else if (act === 'mic') mic(a);
+      else if (act === 'mic') { if (micMode() !== 'whisper') mic(a); }
       else if (act === 'close-toast') { var t = q('.bd-toast'); if (t) t.style.display = 'none'; }
       return;
     }
@@ -185,6 +196,88 @@ var tries = 0;
     if (d.fullscreenElement) { d.exitFullscreen(); return; }
     if (root.requestFullscreen) root.requestFullscreen().catch(function (err) { toast('無法全螢幕：' + err.message); });
   }
+  // ---- 🎤 Whisper（Python 端辨識）：按住講話、放開送出；只點一下＝開始錄，再點一下結束 ----
+  var recState = null, pressing = false, pressT = 0;
+  function micMode() { var b = q('.bd-mic'); return b ? b.getAttribute('data-stt') : ''; }
+  function canRecord() {
+    return window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+  }
+  async function recStart(btn) {
+    if (recState) return;
+    if (!canRecord()) { toast(MIC_HELP, 0); return; }
+    var stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    } catch (err) { toast('🎤 拿不到麥克風（' + err.name + '）：請允許這個網站使用麥克風。', 8000); return; }
+    var Ctx = window.AudioContext || window.webkitAudioContext, ctx;
+    try { ctx = new Ctx({ sampleRate: 16000 }); } catch (err) { ctx = new Ctx(); }   // 16 kHz＝Whisper 的取樣率
+    var src = ctx.createMediaStreamSource(stream), node = ctx.createScriptProcessor(4096, 1, 1), chunks = [];
+    node.onaudioprocess = function (e) {
+      var d = e.inputBuffer.getChannelData(0), s = 0;
+      chunks.push(new Float32Array(d));
+      for (var k = 0; k < d.length; k += 8) s += d[k] * d[k];
+      btn.style.boxShadow = '0 0 0 ' + Math.min(14, Math.sqrt(s / (d.length / 8)) * 90).toFixed(1) + 'px rgba(230,57,70,.35)';
+    };
+    src.connect(node); node.connect(ctx.destination);
+    recState = { ctx: ctx, stream: stream, src: src, node: node, chunks: chunks, rate: ctx.sampleRate, toggle: false };
+    recState.timer = setTimeout(function () { recStop(btn); }, 15000);          // 最長 15 秒
+    btn.classList.add('on'); btn.textContent = '🔴';
+    if (!pressing) { recState.toggle = true; toast('🎤 錄音中……講完再按一次 🎤', 4000); }
+  }
+  function recStop(btn) {
+    var r = recState; if (!r) return; recState = null;
+    clearTimeout(r.timer);
+    try { r.node.disconnect(); r.src.disconnect(); } catch (err) { /* 已經斷開 */ }
+    r.stream.getTracks().forEach(function (t) { t.stop(); });
+    r.ctx.close();
+    btn.classList.remove('on'); btn.textContent = '🎤'; btn.style.boxShadow = '';
+    var n = 0; r.chunks.forEach(function (c) { n += c.length; });
+    var pcm = new Int16Array(n), o = 0;
+    r.chunks.forEach(function (c) {
+      for (var k = 0; k < c.length; k++) { var v = Math.max(-1, Math.min(1, c[k])); pcm[o++] = v < 0 ? v * 32768 : v * 32767; }
+    });
+    sendAudio(pcm, r.rate);
+  }
+  function wavBase64(pcm, rate) {
+    var buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf);
+    function str(off, t) { for (var k = 0; k < t.length; k++) v.setUint8(off + k, t.charCodeAt(k)); }
+    str(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+    v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+    for (var k = 0; k < pcm.length; k++) v.setInt16(44 + k * 2, pcm[k], true);
+    var bytes = new Uint8Array(buf), bin = '';
+    for (var j = 0; j < bytes.length; j += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(j, j + 0x8000));
+    return btoa(bin);
+  }
+  function sendAudio(pcm, rate) {
+    var box = q('.bendan-audio input'); if (!box) return;
+    var auto = q('.bd-autosend');
+    box.value = JSON.stringify({ wav: wavBase64(pcm, rate), auto: !auto || auto.checked, id: Date.now() });
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  // 測試用：不用麥克風，直接把一段聲音（Float32Array、取樣率）送進辨識流程
+  root.__bendanSendAudio = function (floats, rate) {
+    var pcm = new Int16Array(floats.length);
+    for (var k = 0; k < floats.length; k++) { var v = Math.max(-1, Math.min(1, floats[k])); pcm[k] = v < 0 ? v * 32768 : v * 32767; }
+    sendAudio(pcm, rate || 16000);
+  };
+  root.addEventListener('pointerdown', function (e) {
+    var b = e.target.closest('[data-act=mic]');
+    if (!b || micMode() !== 'whisper') return;
+    e.preventDefault();
+    if (recState) { if (recState.toggle) recStop(b); return; }
+    try { b.setPointerCapture(e.pointerId); } catch (err) { /* 舊瀏覽器 */ }
+    pressing = true; pressT = Date.now();
+    recStart(b);
+  });
+  root.addEventListener('pointerup', function () {
+    if (!pressing) return;
+    pressing = false;
+    if (!recState || recState.toggle) return;
+    if (Date.now() - pressT < 350) { recState.toggle = true; toast('🎤 錄音中……講完再按一次 🎤', 4000); }
+    else recStop(q('.bd-mic'));
+  });
   function mic(btn) {
     var R = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (rec) { rec.stop(); return; }
@@ -223,14 +316,26 @@ def _js_loader():
             f"<img src='data:,' alt='' style='display:none' onerror=\"{html.escape(handler, quote=True)}\">")
 
 
-MIC_HTML = ("<div class='bd-micbox'><button class='bd-mic' data-act='mic' title='語音輸入（按一下開始說話）'>🎤</button>"
-            "<label title='辨識完自動送出'><input type='checkbox' class='bd-autosend' checked>自動送出</label></div>")
+def mic_html(stt_label=""):
+    """🎤 按鈕。有 Whisper 時 data-stt="whisper"（按住說話），否則用瀏覽器的語音辨識。"""
+    if stt_label:
+        mode, tip = "whisper", f"按住說話、放開送出（只點一下＝開始，再點一下結束）｜{stt_label}"
+    else:
+        mode, tip = "browser", "語音輸入（按一下開始說話）"
+    return (f"<div class='bd-micbox'><button class='bd-mic' data-act='mic' data-stt='{mode}' "
+            f"title='{html.escape(tip, quote=True)}'>🎤</button>"
+            "<label title='辨識完自動送出（取消的話會先放進輸入框，讓你改一改再按 Enter）'>"
+            "<input type='checkbox' class='bd-autosend' checked>自動送出</label></div>")
+
+
+MIC_HTML = mic_html()
 CLOSE_POPUP = ("<img src='data:,' alt='' style='display:none' onerror=\"var r=this.closest('.bendan-game');"
                "if(r&&r.classList.contains('bendan-popped'))window.close();\">")
 
 
 class WidgetGame:
-    def __init__(self, level=0, mode="silly", tick=0.3, feedback_rounds=1, progress=None, seed=None, view="iso"):
+    def __init__(self, level=0, mode="silly", tick=0.3, feedback_rounds=1, progress=None, seed=None, view="iso",
+                 stt=None):
         import ipywidgets as W
         self.W = W
         self.progress = progress or Progress()
@@ -242,7 +347,10 @@ class WidgetGame:
         self.future, self.future_info = None, None
         self.dirty = True
         self._busy_ui = False
+        self._filling = False
         self.closed = False
+        self.stt = stt                              # 語音辨識後端（bendan.voice）；None＝用瀏覽器的語音辨識
+        self.stt_future = None
 
         self.js = W.HTML(_js_loader())
         self.head = W.HTML()
@@ -255,7 +363,8 @@ class WidgetGame:
         self.extra = W.HTML()
         self.cmd = W.Text(placeholder="跟笨笨說話，按 Enter 送出（例如：請往前走三格然後吸）", continuous_update=False)
         self.btn_send = W.Button(description="送出", button_style="primary", layout=W.Layout(width="64px"))
-        self.mic = W.HTML(MIC_HTML)
+        self.mic = W.HTML(mic_html(getattr(stt, "label", "") if stt else ""))
+        self.audio_in = W.Text(continuous_update=False, layout=W.Layout(display="none"))   # 瀏覽器錄音 → Python
         self.btn_stop = W.Button(description="✋ 停！", button_style="danger", tooltip="鍵盤 Esc 也可以",
                                  layout=W.Layout(width="82px"))
         self.btn_home = W.Button(description="🔋 回充", layout=W.Layout(width="82px"))
@@ -271,6 +380,8 @@ class WidgetGame:
         self.btn_quit = W.Button(description="結束", layout=W.Layout(width="60px"))
 
         self.cmd.add_class("bendan-cmd")
+        self.audio_in.add_class("bendan-audio")
+        self.audio_in.observe(self._on_audio, names="value")
         self.btn_send.add_class("bendan-send")
         self.btn_stop.add_class("bendan-stop")
         self.cmd.observe(self._on_cmd, names="value")
@@ -295,7 +406,7 @@ class WidgetGame:
         for w, cls in ((controls, "bendan-controls"), (inputrow, "bendan-inputrow"), (left, "bendan-left"),
                        (right, "bendan-right"), (main, "bendan-main")):
             w.add_class(cls)
-        self.box = W.VBox([self.js, self.head, controls, main, self.extra])
+        self.box = W.VBox([self.js, self.head, controls, main, self.extra, self.audio_in])
         self.box.add_class("bendan-game")
         self._controls = [self.cmd, self.btn_send, self.btn_stop, self.btn_home, self.btn_coax, self.dd_level,
                           self.tb_mode, self.btn_view, self.btn_reset, self.btn_next, self.btn_info, self.btn_quit]
@@ -328,10 +439,61 @@ class WidgetGame:
 
     # ---------- 玩家操作 ----------
     def _on_cmd(self, change):
-        if change["new"].strip():
+        if change["new"].strip() and not self._filling:
             self._take_input()
 
-    def _take_input(self, text=None):
+    # ---------- 🎤 語音 ----------
+    def _on_audio(self, change):
+        raw = change["new"]
+        if not raw:
+            return
+        self.audio_in.value = ""                    # 清掉，下一段錄音才會再觸發
+        try:
+            msg = json.loads(raw)
+        except ValueError:
+            return
+        if self.stt is None:
+            self.say = "🎤 這台電腦沒有 Whisper：pip install mlx-whisper（Mac）或 faster-whisper，再重新執行這一格。"
+            self.dirty = True
+            return
+        if self.stt_future is not None:
+            self.say = "🎧 上一句還在聽寫，等一下再講。"
+            self.dirty = True
+            return
+        from ..voice import transcribe
+        self.stt_future = STT_EXECUTOR.submit(transcribe, msg["wav"], self.stt)
+        self.stt_auto = bool(msg.get("auto", True))
+        self.say = "🎧 聽寫中……"
+        self.dirty = True
+
+    def _voice_done(self, fut):
+        """語音辨識完成（在背景迴圈裡呼叫）：送出指令，或放進輸入框讓玩家改。"""
+        try:
+            tr = fut.result()
+        except Exception as exc:   # noqa: BLE001
+            self.say = f"🎤 語音辨識出錯：{type(exc).__name__}: {str(exc)[:80]}"
+            self.dirty = True
+            return
+        if not tr.text:
+            self.say = f"🎤 {tr.note or '沒聽清楚，再說一次？'}"
+            self.dirty = True
+            return
+        text = tr.text + ("！！！" if tr.shout else "")    # 用吼的 → 語氣分析會判成「大吼」
+        self.events.append(E("voice", f"🎤 聽到：「{text}」（{tr.seconds:.1f} 秒錄音，辨識 {tr.latency:.1f} 秒）"))
+        if tr.shout:
+            self.events.append(E("shout", "📢 你用吼的！笨笨嚇了一跳。"))
+        if self.stt_auto:
+            self._take_input(text, source="voice")
+        else:
+            self._filling = True
+            try:
+                self.cmd.value = text
+            finally:
+                self._filling = False
+            self.say = "🎤 聽到了，確認一下再按 Enter 送出。"
+        self.dirty = True
+
+    def _take_input(self, text=None, source="text"):
         text = (self.cmd.value if text is None else text).strip()
         self.cmd.value = ""
         if not text:
@@ -348,7 +510,7 @@ class WidgetGame:
             self.say = "等等，我還在想上一句！（急的話先按「停！」）"
             self.dirty = True
             return
-        pre = self.session.preprocess(text)
+        pre = self.session.preprocess(text, source=source)
         self.events.extend(pre["events"])
         if pre["handled"]:
             self.say = pre["say"]
@@ -452,6 +614,9 @@ class WidgetGame:
                                                               depth=info["depth"]))
                         self.say = res["say"] or "……"
                     self.dirty = True
+                if self.stt_future is not None and self.stt_future.done():
+                    fut, self.stt_future = self.stt_future, None
+                    self._voice_done(fut)
                 if self.future is None:
                     fb = self.session.pop_feedback()
                     if fb:
@@ -499,8 +664,13 @@ class WidgetGame:
         self._render(force=True)
 
 
-def play_widgets(level=None, mode="silly", tick=0.3, feedback_rounds=1, unlock_all=False, seed=None, view="iso"):
-    """▶️ 遊戲視窗（推薦）。level=None 會從「還沒破的第一關」開始。"""
+def play_widgets(level=None, mode="silly", tick=0.3, feedback_rounds=1, unlock_all=False, seed=None, view="iso",
+                 voice="auto"):
+    """▶️ 遊戲視窗（推薦）。level=None 會從「還沒破的第一關」開始。
+
+    voice："auto"＝有裝 Whisper 就用（按住 🎤 說話）；"off"＝不用 Whisper（🎤 改用瀏覽器語音辨識）；
+    也可以直接給 `bendan.voice.connect_stt(...)` 回傳的後端。
+    """
     global _ACTIVE_UI
     try:
         import ipywidgets  # noqa: F401
@@ -514,8 +684,15 @@ def play_widgets(level=None, mode="silly", tick=0.3, feedback_rounds=1, unlock_a
     if not progress.is_unlocked(level):
         print(f"🔒 {level_title(level)} 還沒解鎖，先從第 1 關開始（或用 unlock_all=True）。")
         level = 1
+    stt = None
+    if voice not in (None, False, "off"):
+        from .. import voice as voice_mod
+        if isinstance(voice, str):
+            stt = voice_mod.STATE.backend or voice_mod.connect_stt(voice)
+        else:
+            stt = voice
     if _ACTIVE_UI is not None:
         _ACTIVE_UI.quit()
-    _ACTIVE_UI = WidgetGame(level, mode, tick, feedback_rounds, progress=progress, seed=seed, view=view)
+    _ACTIVE_UI = WidgetGame(level, mode, tick, feedback_rounds, progress=progress, seed=seed, view=view, stt=stt)
     display(_ACTIVE_UI.box)
     return _ACTIVE_UI

@@ -1,9 +1,74 @@
-# 🎤 語音輸入可行性評估
+# 🎤 語音輸入
 
-> 問題：玩家能不能直接「用講的」指揮笨笨，而不是打字？
-> 結論：**可行，而且很適合這個遊戲**（坐在副駕駛「動口不動手」的感覺更強）。
-> 但**課程 JupyterHub 是 http，瀏覽器不給麥克風**，所以遊戲裡的 🎤 按鈕在目前的環境不能直接用。
-> **現在就能用的方法是作業系統內建聽寫**，零程式碼；等 JupyterHub 有 https，🎤 按鈕不用改程式就能用。
+> **v4 更新：已經做好本機 Whisper 語音輸入。** 在自己電腦上跑（`localhost` 是安全來源，瀏覽器才給麥克風），
+> 按住 🎤 講話、放開就送出；用吼的還會被當成「大吼」。設定方法見下一節。
+> 課程 JupyterHub 是 http，麥克風仍然被擋，在那邊請用電腦內建聽寫（第 2 節以後是當時的評估）。
+
+## 0. 在自己電腦上啟用 Whisper（v4）
+
+```bash
+pip install -r requirements.txt -r requirements-voice.txt   # Apple Silicon 會裝 mlx-whisper，其他電腦裝 faster-whisper
+export OPENAI_BASE_URL=http://127.0.0.1:你的埠/v1            # 自己的 LLM（Ollama、LM Studio、vLLM……都可以）
+export OPENAI_API_KEY=隨便填或你的 key
+jupyter lab notebooks/01_快速開始_遊玩.ipynb                  # 網址是 localhost → 瀏覽器會問要不要給麥克風
+```
+
+`bendan.play_widgets()` 會自動找 Whisper；第一次會下載模型（Apple Silicon 預設 `whisper-large-v3-turbo`，約 1.6 GB），
+之後就不用網路，**聲音不會離開你的電腦**。
+
+| 操作 | 效果 |
+|---|---|
+| 按住 🎤 講話、放開 | 送去辨識，辨識完自動當成指令送出 |
+| 只點一下 🎤 | 開始錄音；講完再點一下結束（不想一直按著時用） |
+| 取消「自動送出」 | 辨識結果先放進輸入框，改一改再按 Enter |
+| 大聲吼 | 指令後面會加上「！！！」→ 語氣判成「大吼」，笨笨不開心、主人血壓上升 |
+
+指令紀錄會標「🎤 語音」，事件列會顯示「🎤 聽到：「…」（錄音幾秒、辨識幾秒）」。
+
+**程式架構**（`bendan/voice/`）
+
+```
+瀏覽器（遊戲視窗的 JS）：getUserMedia → 16 kHz 單聲道 → WAV → base64
+   │  透過一個隱藏的 ipywidgets Text 傳到 Python（不需要任何擴充套件）
+   ▼
+voice.audio：解碼 WAV、算音量（大吼／太小聲／太短）
+voice.stt：Whisper 後端（自動挑一個）           voice.textfix：簡轉繁、同音字修正、過濾幻覺句
+   ├─ api：BENDAN_STT_URL（OpenAI 相容 /v1/audio/transcriptions）
+   ├─ mlx：mlx-whisper（Apple Silicon）
+   └─ faster：faster-whisper（其他電腦）
+   ▼
+當成玩家打的字送進 session.preprocess(source="voice")
+```
+
+| 處理 | 為什麼 |
+|---|---|
+| 給 Whisper 一句繁體中文的遊戲用語當提示（`INITIAL_PROMPT`） | 輸出比較會是繁體、也比較會選對「左轉」「吸」「臥室」這些詞 |
+| 簡轉繁（有 OpenCC 就用台灣用語 `s2twp`） | Whisper 中文常輸出簡體 |
+| 同音字修正：做轉→左轉、有轉→右轉、往錢→往前、然後西→然後吸、回沖→回充…… | 只修在指令裡幾乎不可能是原意的組合 |
+| 太短（< 0.35 秒）、太小聲就不辨識；「請不吝點贊訂閱」這類句子丟掉 | Whisper 遇到靜音會幻覺出影片字幕常見句 |
+| 語音辨識用自己的執行緒 | 不會跟 LLM 搶，也不會卡住畫面 |
+
+環境變數：`BENDAN_STT`（`auto`／`mlx`／`faster`／`api`／`off`）、`BENDAN_WHISPER_MODEL`（例如記憶體小改
+`mlx-community/whisper-small-mlx`）、`BENDAN_STT_URL`／`BENDAN_STT_KEY`／`BENDAN_STT_MODEL`（用遠端 Whisper 服務時）。
+
+**實測（2026-11-18，MacBook M4 Pro 24 GB，`mlx-community/whisper-large-v3-turbo`）**
+
+用 macOS 內建的台灣中文語音（美佳）念 8 句遊戲指令（`python scripts/voice_check.py` 可以自己重跑）：
+
+| 項目 | 結果 |
+|---|---|
+| 完全正確 | **8/8**（修正前 7/8：Whisper 聽對「不准進臥室」，但 OpenCC 把「准」轉成「準」，連帶禁區規則認不出來 → 已修正並加測試） |
+| 每句辨識時間 | 平均 **0.51 秒**（錄音 0.4～3.3 秒） |
+| 第一次載入 | 下載約 1.6 GB；之後載入約 30 秒內（背景執行緒先載，不會卡住畫面） |
+| 端到端 | 在本機 JupyterLab 的遊戲視窗裡：瀏覽器 JS 轉 WAV → 隱藏 widget → Whisper → 笨笨執行，指令紀錄標「🎤 語音」✅ |
+| 大吼 | 把同一句放大 8 倍送進去 → 判成「大吼」、心情 −4 ✅；但聲音爆掉讓「臥室」被聽成「入室」→ 加進同音字修正 |
+
+注意：模型第一次下載時，Hugging Face 新的 Xet 傳輸曾連不上 CDN（`CAS Client Error`），所以程式預設用一般 HTTP 下載
+（`HF_HUB_DISABLE_XET=1`，使用者自己設過就不動）。真人說話（口音、環境噪音、麥克風品質）的準確率還需要組員實際試玩確認。
+
+---
+
+以下是 v3 時（只能用課程 JupyterHub）的評估。
 
 ## 1. 實測環境與結果（2026-11-18，課程 JupyterHub + Chrome）
 
