@@ -1,10 +1,11 @@
 """SVG 畫面、方向輔助、HUD、遊戲視窗（不需要瀏覽器的部分）。"""
+import json
 import time
 
 import pytest
 from conftest import drive
 
-from bendan.render import direction_aids, facing_text, history_html, hud_html, render_svg, side_html
+from bendan.render import facing_text, history_html, hud_html, render_svg, side_html
 from bendan.world import CAMPAIGN, Game
 
 
@@ -15,12 +16,21 @@ def test_svg_renders_every_level(level_id, view):
     assert svg.startswith("<svg") and svg.endswith("</svg>") and "viewBox" in svg
 
 
-def test_direction_aids_mark_front_left_right():
+@pytest.mark.usefixtures("small_maps")
+def test_no_floor_numbers_or_side_labels_and_facing_text():
+    """v7：地板不再標 1 2 3…、也沒有「左／右／後」字樣（看笨笨的箭頭就知道朝向）。"""
     g = Game(0)                      # 起點 (2,3) 面東，前方 5 格空地
-    aids = direction_aids(g)
-    assert [aids[(2 + k, 3)] for k in range(1, 6)] == ["1", "2", "3", "4", "5"]
-    assert aids[(2, 2)] == "左" and aids[(2, 4)] == "右" and aids[(1, 3)] == "後"
-    assert facing_text(g).startswith("面向東") and "前方可走 5 格" in facing_text(g)
+    for view in ("iso", "top"):
+        svg = render_svg(g, view=view)
+        assert ">左<" not in svg and ">右<" not in svg and ">後<" not in svg and ">1<" not in svg
+    assert facing_text(g).startswith("面向東") and "前方是牆壁" in facing_text(g) and "格" not in facing_text(g)
+
+
+def test_widget_board_leaves_robot_to_frontend():
+    g = Game(3)
+    with_bot, without = render_svg(g), render_svg(g, robot=False)
+    assert "bd-botlayer" in without and "data-proj='iso'" in without and len(without) < len(with_bot)
+    assert "data-proj='top'" in render_svg(g, view="top", robot=False)
 
 
 def test_end_banner_and_fog():
@@ -53,6 +63,8 @@ def test_widget_game_window_smoke(progress):
         assert ui.session.history[-1]["cmd"] == "請往前走三格然後吸"
         ui._render(force=True)
         assert "請往前走三格然後吸" in ui.history.value and "<svg" in ui.board.value
+        bot = json.loads(ui.botw.value.split("'bd-botjs'>")[1].split("</script>")[0])
+        assert (bot["x"], bot["y"]) == ui.session.game.pos and bot["tts"] and bot["sayN"] >= 2
         ui._on_view(None)
         ui._render(force=True)
         assert ui.session.view == "top"
@@ -69,7 +81,7 @@ def test_scene_state_for_3d():
     st = scene_state(g, mood="開心", emotion="得意")
     assert st["robot"]["x"] == g.pos[0] and st["robot"]["facing"] == g.facing and st["robot"]["emotion"] == "😎"
     assert all(g.visible((x, y)) for x, y in st["dirt"]) and len(st["dirt"]) < len(g.dirt)
-    assert any(t[3] == 0 for t in st["tiles"]) and ["1"] == [a[2] for a in st["aids"] if a[2] == "1"]
+    assert any(t[3] == 0 for t in st["tiles"]) and "aids" not in st
     html = scene_html(Game(0))
     data = html.split("class='bd-state'>")[1].split("</script>")[0]
     assert json.loads(data)["w"] == Game(0).w

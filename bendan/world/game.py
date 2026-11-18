@@ -4,6 +4,8 @@
 - `step()`：執行一個微步驟（走一格／轉一次／吸一次），回傳這一步發生的**事件**。
 - `return_home` 用 BFS 找路，會盡量避開禁區與危險物。
 - 進階關卡：`step_limit`（步數上限 = 時間限制）、`dark`（停電：只看得到笨笨附近、走過的地方才會亮）。
+- v6 連續移動：`drive`＝一直往前開，直到「停」、撞到東西或被事件打斷（佇列裡的 ("drive",) 不會被消耗）；
+  `vacuum_on/off`＝吸塵模式，開著的時候走過的格子會順便吸（每格多耗一點電，吸到襪子、水漬一樣出事）。
 """
 import copy
 import heapq
@@ -16,12 +18,13 @@ from .levels import get_level
 
 
 class Game:
-    def __init__(self, level_id=1, seed=None):
+    def __init__(self, level_id=1, seed=None, scale=None):
         self.rng = random.Random(seed)
+        self.scale = scale
         self.load(level_id)
 
     def load(self, level_id):
-        cfg = get_level(level_id)
+        cfg = get_level(level_id, getattr(self, "scale", None))
         rows = cfg["map"]
         self.level_id, self.cfg = level_id, cfg
         self.h, self.w = len(rows), len(rows[0])
@@ -51,6 +54,7 @@ class Game:
         self.cleaned = set()          # 清過的格子（畫面用）
         self.n_cleaned = 0            # 清掉的坨數（灰塵可能會重新出現，所以分開算）
         self.queue = deque()
+        self.vacuum = False           # 吸塵模式（v6）：開著的時候走過的格子會順便吸
         self.violations = 0
         self.steps = 0
         self.battery_max = float(cfg.get("battery", 100))
@@ -67,6 +71,11 @@ class Game:
     @property
     def over(self):
         return self.cleared or self.failed is not None
+
+    @property
+    def driving(self):
+        """正在「一直往前開」（等主人喊停）。"""
+        return bool(self.queue) and self.queue[0][0] == "drive"
 
     @property
     def steps_left(self):
@@ -158,6 +167,10 @@ class Game:
             op = a["op"]
             if op == "forward":
                 self.queue.extend([("move",)] * a["n"])
+            elif op == "drive":
+                self.queue.append(("drive",))
+            elif op in ("vacuum_on", "vacuum_off"):
+                self.queue.append(("vac", op == "vacuum_on"))
             elif op == "turn_left":
                 self.queue.append(("turn", -1))
             elif op == "turn_right":
@@ -176,10 +189,18 @@ class Game:
             return []
         if not self.queue:
             return []
-        kind, *arg = self.queue.popleft()
+        if self.queue[0][0] == "vac":           # 開關吸塵不花時間
+            on = self.queue.popleft()[1]
+            if on == self.vacuum:
+                return []
+            self.vacuum = on
+            return [E("vacuum", "🌀 吸塵模式開啟：走過的地方會順便吸。" if on else "吸塵模式關閉。", on=on)]
+        kind, *arg = self.queue[0] if self.queue[0][0] == "drive" else self.queue.popleft()
         self.steps += 1
         events = []
-        if kind == "turn":
+        if kind == "drive":
+            events += self._move()
+        elif kind == "turn":
             self.facing = (self.facing + arg[0]) % 4
             self.battery -= BATTERY_COST["turn"]
         elif kind == "move":
@@ -206,9 +227,22 @@ class Game:
             self.queue.clear()   # 途中碰撞 → 中斷整串動作
             what = self.what_at(nxt)
             return [E("collision", f"撞到{what}了，動作中斷！", target=what)]
-        self.battery -= BATTERY_COST["move"]
+        self.battery -= BATTERY_COST["move"] + (BATTERY_COST["vacuum"] if self.vacuum else 0.0)
         prev, self.pos = self.pos, nxt
-        return self._enter(nxt, prev)
+        events = self._enter(nxt, prev)
+        if self.vacuum and not self.over:
+            events += self._vacuum_here()
+        return events
+
+    def _vacuum_here(self):
+        """吸塵模式：走到哪吸到哪。灰塵直接清掉；襪子、水漬一樣會出事（吸塵模式也會跟著關掉）。"""
+        p = self.pos
+        if p in self.dirt:
+            return self._suck()
+        if self.objects.get(p) in ("sock", "puddle"):
+            self.vacuum = False
+            return self._suck()
+        return []
 
     def _enter(self, p, prev, depth=0):
         """機器人進到格子 p 時發生的事。"""

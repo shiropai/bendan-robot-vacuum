@@ -60,7 +60,8 @@ def normalize(actions):
         else:
             flush_rot()
             flush_fwd()
-            out.append({"suck": "S", "return_home": "H", "stop": "X"}[op])
+            out.append({"suck": "S", "return_home": "H", "stop": "X", "drive": "D",
+                        "vacuum_on": "V+", "vacuum_off": "V-"}[op])
     flush_rot()
     flush_fwd()
     return " ".join(out)

@@ -3,7 +3,7 @@
 SVG 畫面不需要 matplotlib，任何 Kernel 都能玩；`render_png` 只在有 matplotlib 時可用（評估報告、存圖）。
 """
 from .ascii import map_html, render_ascii
-from .board import direction_aids, facing_text, render_svg
+from .board import facing_text, render_svg
 from .hud import (EVENT_ICON, achievements_html, bubble_html, difficulty_html, event_line, history_html, hud_html, levels_html,
                   meters_html, modifiers_html, result_html, side_html)
 
@@ -25,6 +25,6 @@ def show(game, view="iso", **kw):
     display(HTML(render_svg(game, view=view, **kw)))
 
 
-__all__ = ["CJK_FONT", "EVENT_ICON", "FONT", "HAS_MPL", "L", "achievements_html", "bubble_html", "difficulty_html", "direction_aids",
+__all__ = ["CJK_FONT", "EVENT_ICON", "FONT", "HAS_MPL", "L", "achievements_html", "bubble_html", "difficulty_html",
            "event_line", "facing_text", "history_html", "hud_html", "levels_html", "map_html", "meters_html",
            "modifiers_html", "render_ascii", "render_png", "render_svg", "result_html", "show", "side_html"]

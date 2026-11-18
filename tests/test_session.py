@@ -1,3 +1,4 @@
+import pytest
 import json
 
 from conftest import drive
@@ -6,6 +7,7 @@ from bendan.session import JsonlLogger
 from bendan.ui.commands import handle_slash
 
 
+@pytest.mark.usefixtures("small_maps")
 def test_clear_tutorial_level(session_factory, progress):
     s = session_factory(0, "serious")
     drive(s, "請往前走三格然後吸")
@@ -94,6 +96,7 @@ def test_slash_commands(session_factory, progress):
     assert "成就" in handle_slash(s, "/achievements")["html"]
 
 
+@pytest.mark.usefixtures("small_maps")
 def test_session_guardrail_and_slash_toggle(session_factory):
     s = session_factory(2, "serious")          # 第 2 關：臥室是禁區
     assert "開啟" in handle_slash(s, "/guard on")["say"] and s.guardrail

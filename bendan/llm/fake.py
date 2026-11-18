@@ -8,7 +8,7 @@ import random
 import re
 import time
 
-MAX_FORWARD = 30
+MAX_FORWARD = 60
 CN_DIGITS = {"零": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 NUM_RE = r"([0-9]+|[一二兩三四五六七八九十]+)"
 
@@ -33,6 +33,12 @@ def parse_simple_command(cmd):
             acts.append({"op": "stop"})
         times = re.search(NUM_RE + r"\s*次", c)
         k = cn_to_int(times.group(1)) if times else 1
+        if re.search(r"關.{0,2}吸塵|不要吸|別吸", c):
+            acts.append({"op": "vacuum_off"})
+            continue
+        if re.search(r"開.{0,2}吸塵|邊走邊吸|一路吸", c):
+            acts.append({"op": "vacuum_on"})
+            c = re.sub(r"開.{0,2}吸塵|邊走邊吸|一路吸", "", c)
         if "吸" in c and not re.search(r"走|前進", c):
             acts += [{"op": "suck"}] * k
         if re.search(r"回充|充電|回家|回去", c):
@@ -45,8 +51,10 @@ def parse_simple_command(cmd):
         elif "右" in c:
             acts += [{"op": "turn_right"}] * (k if "轉" in c else 1)
         n = re.search(NUM_RE + r"\s*(格|步)", c)
-        if n or re.search(r"前進|往前|走", c):
-            acts.append({"op": "forward", "n": min(cn_to_int(n.group(1)) if n else 1, MAX_FORWARD)})
+        if n:
+            acts.append({"op": "forward", "n": min(cn_to_int(n.group(1)), MAX_FORWARD)})
+        elif re.search(r"前進|往前|直走|衝|走", c):
+            acts.append({"op": "drive"})      # v6：沒講格數 → 一直往前開，等主人喊停
     return acts
 
 

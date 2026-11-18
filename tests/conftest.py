@@ -55,3 +55,11 @@ def drive(session, command):
         while session.busy():
             events += session.tick()
     return events
+
+
+@pytest.fixture
+def small_maps(monkeypatch):
+    """用 v5 以前的原始小地圖（不放大）：這些測試寫死了格子座標，測的是規則本身，跟地圖大小無關。"""
+    from bendan.world import scale
+    monkeypatch.setattr(scale, "MAP_SCALE", 1)
+    yield

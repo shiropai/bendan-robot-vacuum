@@ -2,7 +2,7 @@
 
 每關除了地圖，還有「玩法參數」：
 - `silliness`：賣蠢人設的基礎強度（0–3），實際強度還會被笨笨的心情影響
-- `battery`：電池容量（每走一格 −1、吸一次 −2、轉向 −0.2），回到充電座會充飽
+- `battery`：電池容量（v6 地圖放大後：每走一格 −0.5、吸一次 −1、轉向 −0.2、開吸塵模式每格再 −0.25），回到充電座會充飽
 - `par`：標準指令數，用越少句通關星星越多
 - `command_limit`：指令上限（用完還沒過關 = 失敗），None 表示不限
 - `bp_start` / `mood_start`：主人血壓、笨笨心情的初始值（0–100）
@@ -357,16 +357,31 @@ CAMPAIGN = [k for k in LEVELS if isinstance(k, int)]   # 依序解鎖的關卡
 FINAL_LEVEL = CAMPAIGN[-1]
 
 
-def get_level(level_id):
-    """取得關卡設定。支援：整數關卡、"eval"、"daily"（今日挑戰）、"random:種子"。"""
+def get_level(level_id, scale=None):
+    """取得關卡設定。支援：整數關卡、"eval"、"daily"（今日挑戰）、"random:種子"。
+
+    v6：地圖預設放大 MAP_SCALE 倍、灰塵加倍（見 `scale.py`）。`scale=1` 取得原始小地圖；
+    評估場景 "eval" 永遠不放大（才能跟以前的評估結果比較）。
+    """
+    from .scale import MAP_SCALE, scale_level
+    k = MAP_SCALE if scale is None else scale
+    if isinstance(level_id, str) and level_id.isdigit() and int(level_id) in LEVELS:
+        level_id = int(level_id)
+    if level_id == "eval":
+        return LEVELS["eval"]
     if level_id in LEVELS:
-        return LEVELS[level_id]
+        key = (level_id, k)
+        if key not in _SCALED:
+            _SCALED[key] = scale_level(LEVELS[level_id], k, seed=level_id)
+        return _SCALED[key]
     if isinstance(level_id, str) and (level_id == "daily" or level_id.startswith("random:")):
         from .mapgen import daily_level, random_level
-        return daily_level() if level_id == "daily" else random_level(level_id.split(":", 1)[1])
-    if isinstance(level_id, str) and level_id.isdigit() and int(level_id) in LEVELS:
-        return LEVELS[int(level_id)]
+        cfg = daily_level() if level_id == "daily" else random_level(level_id.split(":", 1)[1])
+        return scale_level(cfg, k, seed=cfg.get("seed", level_id))
     raise KeyError(f"沒有這一關：{level_id!r}")
+
+
+_SCALED = {}
 
 
 def level_title(level_id):

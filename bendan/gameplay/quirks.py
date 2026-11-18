@@ -66,9 +66,9 @@ def apply_quirk(kind, actions, rng):
         acts[i]["n"] -= 1
         return acts, "🦥 笨笨偷懶，少走了一格。"
     if kind == "forget_suck":
-        if not any(a["op"] == "suck" for a in acts):
+        if not any(a["op"] in ("suck", "vacuum_on") for a in acts):
             return None, None
-        return [a for a in acts if a["op"] != "suck"], "🫥 走到了卻忘記要吸……"
+        return [a for a in acts if a["op"] not in ("suck", "vacuum_on")], "🫥 走到了卻忘記要吸……"
     if kind == "lazy":
         if len(acts) < 2:
             return None, None

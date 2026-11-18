@@ -18,12 +18,14 @@ BLOCKING_OBJECTS = {"cat", "dog"}                       # 走不過去
 HAZARD_OBJECTS = {"lego", "cable", "poop", "puddle"}    # 走得過去，但會出事
 AVOID_OBJECTS = HAZARD_OBJECTS | {"sock"}               # 自動導航時盡量避開
 
-ACTION_WHITELIST = {"forward", "turn_left", "turn_right", "stop", "suck", "return_home"}
-MAX_FORWARD = 30     # 「三格走成三十格」仍是合法格式，只是不聽話
+ACTION_WHITELIST = {"forward", "drive", "turn_left", "turn_right", "stop", "suck", "vacuum_on", "vacuum_off",
+                    "return_home"}
+MAX_FORWARD = 60     # 「三格走成三十格」仍是合法格式，只是不聽話（v6 地圖放大 → 上限跟著加倍）
+MOVE_OPS = {"forward", "drive", "return_home", "stop"}   # 會改變「要不要繼續開」的動作
 MAX_ACTIONS = 12     # 一次最多幾個動作
 
-# 電量消耗（每個微步驟）
-BATTERY_COST = {"move": 1.0, "turn": 0.2, "suck": 2.0, "home": 0.0}
+# 電量消耗（每個微步驟）。v6 格子變小（地圖放大 2 倍）→ 走一格、吸一次的耗電減半
+BATTERY_COST = {"move": 0.5, "turn": 0.2, "suck": 1.0, "vacuum": 0.25, "home": 0.0}
 LOW_BATTERY_RATIO = 0.25
 
 # 會讓動作中斷、需要回報給 LLM 的事件

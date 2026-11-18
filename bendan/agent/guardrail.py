@@ -9,7 +9,7 @@ Prompt 明明寫「絕對不能進去」，正經模式只有 17%、賣蠢模式
 """
 import copy
 
-from ..world.constants import INTERRUPT_EVENTS
+from ..world.constants import INTERRUPT_EVENTS, MAX_FORWARD
 from ..world.game import run_to_end
 
 
@@ -21,7 +21,10 @@ def guard_forbidden(game, actions):
     g.queue.clear()
     kept = []
     for a in actions:
-        steps = [{"op": "forward", "n": 1}] * a["n"] if a["op"] == "forward" else [a]
+        if a["op"] in ("forward", "drive"):     # drive（一直開）＝ 最多 MAX_FORWARD 格的前進
+            steps = [{"op": "forward", "n": 1}] * (a["n"] if a["op"] == "forward" else MAX_FORWARD)
+        else:
+            steps = [a]
         done = 0
         for step in steps:
             g.set_plan([step])

@@ -5,11 +5,11 @@
 """
 import json
 
-from .board import EMOJI, EMOTION_ICON, FORBIDDEN_FILL, MOOD_LID, ROOM_COLORS, direction_aids
+from .board import EMOJI, EMOTION_ICON, FORBIDDEN_FILL, MOOD_LID, ROOM_COLORS
 
 
-def scene_state(game, mood=None, emotion=None, thinking=False):
-    """回傳 dict：地圖、物件、機器人、方向標示、迷霧。座標都是格子 (x, y)，y 向下＝南。"""
+def scene_state(game, mood=None, emotion=None, thinking=False, tick=0.25):
+    """回傳 dict：地圖、物件、機器人、迷霧。座標都是格子 (x, y)，y 向下＝南。"""
     tiles = []
     for y in range(game.h):
         for x in range(game.w):
@@ -30,8 +30,9 @@ def scene_state(game, mood=None, emotion=None, thinking=False):
         "home": list(game.home) if game.home else None,
         "robot": {"x": game.pos[0], "y": game.pos[1], "facing": game.facing,
                   "lid": MOOD_LID.get(mood, "#98c1d9"), "emotion": EMOTION_ICON.get(emotion, ""),
-                  "thinking": bool(thinking), "low": game.battery_pct < 25},
-        "aids": [[x, y, tag] for (x, y), tag in sorted(direction_aids(game).items())] if not game.over else [],
+                  "thinking": bool(thinking), "low": game.battery_pct < 25,
+                  "driving": game.driving, "vac": game.vacuum},
+        "tick": tick,                    # 前端用來算等速移動的速度（每個 tick 走一格）
         "rooms": [[name, (x0 + x1 + 1) / 2, (y0 + y1 + 1) / 2, name in game.forbidden]
                   for name, (x0, y0, x1, y1) in game.rooms.items()],
         "over": "clear" if game.cleared else (game.failed or ""),
