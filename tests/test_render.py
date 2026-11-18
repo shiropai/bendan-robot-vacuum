@@ -59,3 +59,40 @@ def test_widget_game_window_smoke(progress):
     finally:
         ui.quit()
     assert ui.cmd.disabled and "window.close" in ui.head.value
+
+
+def test_scene_state_for_3d():
+    import json
+
+    from bendan.render.scene import scene_html, scene_state
+    g = Game(9)                                   # 停電關：看不到的東西不能送出去
+    st = scene_state(g, mood="開心", emotion="得意")
+    assert st["robot"]["x"] == g.pos[0] and st["robot"]["facing"] == g.facing and st["robot"]["emotion"] == "😎"
+    assert all(g.visible((x, y)) for x, y in st["dirt"]) and len(st["dirt"]) < len(g.dirt)
+    assert any(t[3] == 0 for t in st["tiles"]) and ["1"] == [a[2] for a in st["aids"] if a[2] == "1"]
+    html = scene_html(Game(0))
+    data = html.split("class='bd-state'>")[1].split("</script>")[0]
+    assert json.loads(data)["w"] == Game(0).w
+
+
+def test_view_cycles_through_3d(session_factory):
+    from bendan.ui.commands import handle_slash
+    s = session_factory(0)
+    assert [handle_slash(s, "/view") and s.view for _ in range(3)] == ["top", "3d", "iso"]
+    handle_slash(s, "/view 3d")
+    assert s.view == "3d"
+
+
+def test_3d_asset_bundle_has_furniture_and_pets():
+    import json
+
+    from bendan.render.assets3d import asset_bundle_json, assets_html
+    d = json.loads(asset_bundle_json().replace("<\\/", "</"))
+    assert {"loungeSofa", "kitchenFridge", "toilet", "rugRectangle"} <= set(d["furniture"])
+    assert all(v["obj"].lstrip().startswith(("#", "mtllib", "o ", "v ")) for v in d["furniture"].values())
+    assert set(d["pets"]) == {"cat", "dog"} and "bd-assets" in assets_html()
+
+
+def test_scene3d_js_is_embedded_in_game_window():
+    from bendan.ui.widget_mode import SCENE3D_JS, _js_loader
+    assert "ROOM_FURNITURE" in SCENE3D_JS and "/*SCENE3D*/" not in _js_loader()

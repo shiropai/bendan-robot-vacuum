@@ -13,6 +13,10 @@
 記性差、導航壞掉要你指路、停電只看得到附近、步數限制｜🧭 清楚的**方向標示**（黃箭頭、前方 1 2 3 格、左／右、指北針、俯視視角）｜
 🪟 **遊戲視窗**：可以**彈出成獨立視窗**或全螢幕，Enter 送出、Esc 停｜📜 對話框下方的**指令紀錄**｜🎤 [語音輸入評估](docs/voice_input.md)。
 
+**v5**：🧊 **3D 視角**（Three.js）——「🔄 視角」切到 3D：有家具的房子（沙發、電視、廚房、書櫃、浴室；木地板／磁磚／地毯）、會走路的貓和柴犬、細節完整的掃地機器人、陰影與燈光；相機跟在笨笨背後（畫面的左右＝笨笨的左右），也可以俯瞰。模型都是 CC0（Kenney、Quaternius，見 `bendan/assets/3d/LICENSE.md`）。
+
+![3D 俯瞰](docs/images/game_3d_overview.png)
+
 **v4**：🎤 **Whisper 語音輸入**——在自己電腦上跑時，按住 🎤 講話、放開就送出（聲音不離開電腦；用吼的會被判成「大吼」）。見 [docs/voice_input.md](docs/voice_input.md)。
 
 詳見 [docs/gameplay.md](docs/gameplay.md)、難度曲線實測 [docs/difficulty.md](docs/difficulty.md)。
