@@ -16,7 +16,7 @@ EVENT_ICON = {"collision": "💥", "lego": "🧱", "tangled": "🔌", "jammed": 
               "dog_poop": "💩", "doorbell": "🔔", "pet_moved": "🐾", "mood": "💭", "tone": "🗣️", "combo": "🔥",
               "combo_break": "💔", "refused": "🙅", "dazed": "😵", "level_fail": "💀", "level_result": "🏁",
               "achievement": "🏅", "guardrail": "🛡️", "quirk": "🙃", "forgot": "🧠",
-              "leak": "💧"}
+              "leak": "💧", "voice": "🎤", "shout": "📢"}
 
 
 def event_line(e):

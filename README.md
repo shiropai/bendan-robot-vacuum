@@ -13,6 +13,8 @@
 記性差、導航壞掉要你指路、停電只看得到附近、步數限制｜🧭 清楚的**方向標示**（黃箭頭、前方 1 2 3 格、左／右、指北針、俯視視角）｜
 🪟 **遊戲視窗**：可以**彈出成獨立視窗**或全螢幕，Enter 送出、Esc 停｜📜 對話框下方的**指令紀錄**｜🎤 [語音輸入評估](docs/voice_input.md)。
 
+**v4**：🎤 **Whisper 語音輸入**——在自己電腦上跑時，按住 🎤 講話、放開就送出（聲音不離開電腦；用吼的會被判成「大吼」）。見 [docs/voice_input.md](docs/voice_input.md)。
+
 詳見 [docs/gameplay.md](docs/gameplay.md)、難度曲線實測 [docs/difficulty.md](docs/difficulty.md)。
 
 ![遊戲視窗（彈出成獨立視窗）：第 10 關除夕大掃除](docs/images/game_window_level10.jpg)
@@ -49,6 +51,7 @@
 │   ├── session.py             #   Agent 迴圈＋玩法＋非同步＋事件回饋＋JSONL log
 │   ├── render/                #   SVG 遊戲畫面（2.5D／俯視＋方向標示）、HUD（HTML）、ASCII、matplotlib PNG
 │   ├── ui/                    #   遊戲視窗 play_widgets()（可彈出）、文字模式 play()、斜線指令
+│   ├── voice/                 #   語音輸入：WAV 解碼與音量、Whisper 後端（mlx／faster-whisper／API）、辨識結果清理
 │   └── evaluation/            #   照做率、格式正確率、記憶遵守率、心情實驗、log 分析
 ├── notebooks/
 │   ├── 01_快速開始_遊玩.ipynb   # 連線 → 玩法說明 → 開始玩
@@ -85,9 +88,10 @@
 
 實測結果（Qwen2.5-7B 的照做率、禁區遵守率、心情實驗、遊玩紀錄）見 [docs/evaluation_results.md](docs/evaluation_results.md)。
 
-### 在自己電腦
+### 在自己電腦（可以用語音）
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-voice.txt   # 語音輸入（Whisper）可選
+export OPENAI_BASE_URL=http://127.0.0.1:<埠>/v1 OPENAI_API_KEY=<key>   # 自己的 LLM；沒設就用離線 FakeLLM
 jupyter lab notebooks/01_快速開始_遊玩.ipynb   # 沒有 API 設定時自動用離線 FakeLLM
 python scripts/play_cli.py                     # 或直接在終端機玩（預設從還沒破的第一關開始）
 pytest -q                                      # 跑測試

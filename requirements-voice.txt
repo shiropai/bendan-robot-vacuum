@@ -1,0 +1,7 @@
+# 語音輸入（Whisper）——在自己電腦上玩才需要，課程 JupyterHub 用不到（http 拿不到麥克風）
+#   pip install -r requirements.txt -r requirements-voice.txt
+jupyterlab>=4.0                                   # 本機開 Notebook（localhost 才拿得到麥克風）
+mlx-whisper>=0.4 ; sys_platform == "darwin" and platform_machine == "arm64"   # Apple Silicon：最快
+faster-whisper>=1.0 ; sys_platform != "darwin" or platform_machine != "arm64"  # Windows／Linux／Intel Mac
+opencc-python-reimplemented>=0.1.7               # 簡轉繁（台灣用語）；沒裝也能用內建對照表
+numpy>=1.24

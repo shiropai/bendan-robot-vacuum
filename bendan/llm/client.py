@@ -55,8 +55,16 @@ def connect(model=None, use_fake=None, verbose=True):
         raise RuntimeError("要求使用真模型，但沒有可用的 API client。")
     STATE.available_models = list_models(verbose=False) if STATE.client else []
     STATE.connected = True
+    model = model or os.getenv("BENDAN_MODEL")
     if model:
         set_model(model)
+    elif STATE.available_models and resolve_model(STATE.model) is None:
+        # 預設模型（qwen2.5:7b）不在這台伺服器上：例如自己電腦只開了一個模型 → 用它
+        STATE.model = STATE.available_models[0]
+        if verbose:
+            print(f"（伺服器上沒有 {config.DEFAULT_MODEL}，改用 {STATE.model}）")
+    elif STATE.available_models:
+        STATE.model = resolve_model(STATE.model)
     if verbose:
         print("Selected model:", model_name())
     return STATE
@@ -83,10 +91,34 @@ def list_models(verbose=True):
     return models
 
 
+def _key(name):
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def resolve_model(name, available=None):
+    """把課程的模型簡稱對到伺服器上真正的名字。
+
+    課程 vLLM 叫 `qwen2.5:7b`；自己電腦上的伺服器（mlx-lm、LM Studio……）可能叫
+    `mlx-community/Qwen2.5-7B-Instruct-4bit`。完全一樣就直接用；否則找「名字裡包含簡稱」的模型
+    （忽略大小寫和符號）；都找不到就回傳 None。
+    """
+    available = STATE.available_models if available is None else available
+    if not available or name in available:
+        return name
+    k = _key(name)
+    hits = [m for m in available if k and k in _key(m)]
+    return min(hits, key=len) if hits else None
+
+
 def set_model(name, check=True):
     _ensure()
-    if check and not STATE.use_fake and STATE.available_models and name not in STATE.available_models:
-        raise ValueError(f"模型 {name} 不在可用清單中：{STATE.available_models}")
+    if check and not STATE.use_fake and STATE.available_models:
+        real = resolve_model(name)
+        if real is None:
+            raise ValueError(f"模型 {name} 不在可用清單中：{STATE.available_models}")
+        if real != name:
+            print(f"（模型 {name} → 這台伺服器上叫 {real}）")
+        name = real
     STATE.model = name
 
 
