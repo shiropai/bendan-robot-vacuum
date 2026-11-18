@@ -32,10 +32,12 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from ..gameplay.progress import Progress
 from ..gameplay.scoring import stars_text
 from ..render import bubble_html, history_html, render_svg, side_html
+from ..render.scene import scene_html
 from ..session import EXECUTOR, Session
 from ..world.constants import E
 from ..world.levels import CAMPAIGN, level_title
@@ -43,6 +45,10 @@ from .commands import COAX_LINES, HELP, change_level, handle_slash, next_level
 
 _ACTIVE_UI = None
 STT_EXECUTOR = ThreadPoolExecutor(max_workers=1)     # 語音辨識另外一條執行緒，不跟 LLM 搶
+
+# 3D 用的 Three.js（鎖定版本、ESM；第一次切到 3D 時才下載，約 750 KB）。3D 場景的程式在 scene3d.js
+THREE_BASE = "https://cdn.jsdelivr.net/npm/three@0.160.0"
+SCENE3D_JS = (Path(__file__).with_name("scene3d.js")).read_text(encoding="utf-8")
 
 MIC_HELP = (
     "🎤 <b>瀏覽器不給麥克風權限</b>：課程 JupyterHub 是 http（不是 https），Chrome 只在安全連線開放麥克風。<br>"
@@ -87,6 +93,12 @@ body.bendan-popup-body{overflow:auto!important;margin:0;background:#fffdf8!impor
 .bd-placeholder{padding:14px;border:2px dashed #e9c46a;border-radius:12px;background:#fffdf0;font-size:15px;color:#222}
 .bendan-game [data-cmd]{cursor:pointer}.bendan-game [data-cmd]:hover{text-decoration:underline}
 .bd-keys{font-size:11px;color:#888;margin:2px 0 4px}
+.bd-3dhost{position:relative;width:100%;min-height:120px}
+.bd-3dhost canvas{width:100%!important;height:auto!important;border-radius:12px;display:block;touch-action:none}
+.bd-3dbar{position:absolute;top:8px;right:8px;display:flex;gap:4px}
+.bd-3dover{display:none;position:absolute;left:0;right:0;top:42%;text-align:center;font-size:40px;font-weight:bold;
+  color:#2a9d8f;background:rgba(255,255,255,.85);padding:6px 0}
+.bd-3dmsg{padding:40px;text-align:center;color:#666}
 kbd{border:1px solid #bbb;border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:11px;background:#fafafa}
 """
 
@@ -304,13 +316,16 @@ var tries = 0;
     };
     try { rec.start(); } catch (err) { rec = null; btn.classList.remove('on'); btn.textContent = '🎤'; toast(MIC_HELP, 0); }
   }
+
+/*SCENE3D*/
   setTimeout(function () { var i = input(); if (i && !root.__win) i.focus(); }, 400);
 })();
 """
 
 
 def _js_loader():
-    code = "var MIC_HELP = " + json.dumps(MIC_HELP) + ";\n" + GAME_JS
+    code = ("var MIC_HELP = " + json.dumps(MIC_HELP) + ";\nvar THREE_BASE = " + json.dumps(THREE_BASE) + ";\n"
+            + GAME_JS.replace("/*SCENE3D*/", SCENE3D_JS))
     handler = "new Function('el', " + json.dumps(code) + ")(this)"
     return (f"<style>{GAME_CSS}</style><div class='bd-toast'></div>"
             f"<img src='data:,' alt='' style='display:none' onerror=\"{html.escape(handler, quote=True)}\">")
@@ -355,6 +370,8 @@ class WidgetGame:
         self.js = W.HTML(_js_loader())
         self.head = W.HTML()
         self.board = W.HTML()
+        self.board3d = W.HTML("<div class='bd-3dhost'></div>", layout=W.Layout(display="none"))   # Three.js 畫在這裡
+        self.assets3d = W.HTML("", layout=W.Layout(display="none"))   # 3D 素材包（第一次切到 3D 才送）
         self.side = W.HTML()
         self.bubble = W.HTML()
         self.history = W.HTML()
@@ -372,7 +389,7 @@ class WidgetGame:
         self.dd_level = W.Dropdown(options=self._level_options(), value=level, layout=W.Layout(width="270px"))
         self.tb_mode = W.ToggleButtons(options=[("賣蠢", "silly"), ("正經", "serious")], value=mode,
                                        style={"button_width": "56px"}, tooltips=["賣蠢模式", "正經模式（對照組）"])
-        self.btn_view = W.Button(description="🔄 視角", tooltip="切換 2.5D／俯視（上方＝北）", layout=W.Layout(width="80px"))
+        self.btn_view = W.Button(description="🔄 視角", tooltip="切換 2.5D → 俯視 → 3D", layout=W.Layout(width="80px"))
         self.btn_reset = W.Button(description="↺ 重來", layout=W.Layout(width="74px"))
         self.btn_next = W.Button(description="下一關 ▶", layout=W.Layout(width="88px"))
         self.btn_info = W.ToggleButton(description="📋 關卡／成就／說明", tooltip="選關、成就與指令說明",
@@ -400,13 +417,13 @@ class WidgetGame:
         controls = W.HBox([self.dd_level, self.tb_mode, self.btn_view, self.btn_reset, self.btn_next, self.btn_info,
                            self.btn_quit])
         inputrow = W.HBox([self.cmd, self.btn_send, self.mic, self.btn_stop, self.btn_home, self.btn_coax])
-        left = W.VBox([self.board, self.bubble, inputrow, self.keys, self.history])
+        left = W.VBox([self.board, self.board3d, self.bubble, inputrow, self.keys, self.history])
         right = W.VBox([self.side])
         main = W.HBox([left, right])
         for w, cls in ((controls, "bendan-controls"), (inputrow, "bendan-inputrow"), (left, "bendan-left"),
                        (right, "bendan-right"), (main, "bendan-main")):
             w.add_class(cls)
-        self.box = W.VBox([self.js, self.head, controls, main, self.extra, self.audio_in])
+        self.box = W.VBox([self.js, self.head, controls, main, self.extra, self.audio_in, self.assets3d])
         self.box.add_class("bendan-game")
         self._controls = [self.cmd, self.btn_send, self.btn_stop, self.btn_home, self.btn_coax, self.dd_level,
                           self.tb_mode, self.btn_view, self.btn_reset, self.btn_next, self.btn_info, self.btn_quit]
@@ -540,8 +557,9 @@ class WidgetGame:
         self.dirty = True
 
     def _on_view(self, _):
-        self.session.view = "top" if self.session.view == "iso" else "iso"
-        self.say = "俯視視角：地圖上方＝北。" if self.session.view == "top" else "2.5D 視角：看右上角的指北針分辨方向。"
+        from .commands import VIEW_NAMES, next_view
+        self.session.view = next_view(self.session.view)
+        self.say = VIEW_NAMES[self.session.view]
         self.dirty = True
 
     def _on_level(self, change):
@@ -641,14 +659,21 @@ class WidgetGame:
         s = self.session
         with s.lock:
             mood = s.mood.name if s.gameplay and s.mode == "silly" else None
+            if s.view == "3d":
+                if not self.assets3d.value:
+                    from ..render.assets3d import assets_html
+                    self.assets3d.value = assets_html()
+                board = scene_html(s.game, mood=mood, emotion=s.emotion, thinking=thinking)
+            else:
+                board = render_svg(s.game, view=s.view, thinking=thinking, mood=mood, emotion=s.emotion, max_width=920)
             values = {
-                "board": render_svg(s.game, view=s.view, thinking=thinking, mood=mood, emotion=s.emotion,
-                                    max_width=920),
+                "board": board,
                 "side": side_html(s, self.events),
                 "bubble": bubble_html(s, self.say, thinking),
                 "history": history_html(s, limit=12),
                 "head": self._head_html(),
             }
+        self.board3d.layout.display = None if s.view == "3d" else "none"
         for name, value in values.items():
             w = getattr(self, name)
             if w.value != value:
