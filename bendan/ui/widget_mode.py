@@ -37,6 +37,7 @@ from pathlib import Path
 from ..gameplay.progress import Progress
 from ..gameplay.scoring import stars_text
 from ..render import bubble_html, history_html, render_svg, side_html
+from ..render.board import EMOTION_ICON, MOOD_LID
 from ..render.scene import scene_html
 from ..session import EXECUTOR, Session
 from ..world.constants import E
@@ -216,6 +217,7 @@ var tries = 0;
   }
   async function recStart(btn) {
     if (recState) return;
+    try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (err) { }   // 講話時笨笨先閉嘴，免得被錄進去
     if (!canRecord()) { toast(MIC_HELP, 0); return; }
     var stream;
     try {
@@ -317,6 +319,160 @@ var tries = 0;
     try { rec.start(); } catch (err) { rec = null; btn.classList.remove('on'); btn.textContent = '🎤'; toast(MIC_HELP, 0); }
   }
 
+  // ===== v7：笨笨連續移動（每移動一格或轉 90 度＝30 幀）=====
+  // 遊戲邏輯還是格子（房間、灰塵、碰撞都用格子算，LLM 也用格子描述），但畫面上的笨笨由前端自己畫：
+  // Python 每個 tick 送來「笨笨現在在哪一格、面向哪」，這裡把上一格 → 這一格切成 30 個畫格播放，
+  // 效果等於把地圖放大 30 倍、笨笨每幀走 1/30 格。2D（.bd-botlayer）和 3D（scene3d.js）共用同一個 Motion。
+  var FRAMES = 30;
+  function Motion() {
+    var cur = null, q = [], seg = null, lastT = 0, ema = 0;
+    function tail() { return q.length ? q[q.length - 1] : (seg ? seg.to : cur); }
+    return {
+      push: function (x, y, r, tickMs, now) {
+        var t = tail();
+        if (!t) { cur = { x: x, y: y, r: r }; lastT = now; return; }
+        r = t.r + Math.atan2(Math.sin(r - t.r), Math.cos(r - t.r));          // 轉最近的方向
+        if (Math.abs(x - t.x) + Math.abs(y - t.y) + Math.abs(r - t.r) < 1e-6) return;
+        var gap = now - lastT; lastT = now;
+        gap = Math.min(Math.max(gap, tickMs * 0.6), tickMs * 1.6);
+        ema = ema ? ema * 0.7 + gap * 0.3 : tickMs;                           // 跟著實際的更新節奏走，才不會走走停停
+        var d = Math.abs(x - t.x) + Math.abs(y - t.y);
+        if (d > 3) { q = []; seg = null; cur = { x: x, y: y, r: r }; return; } // 換關、重來：直接跳過去
+        q.push({ x: x, y: y, r: r, dur: ema * Math.max(1, d) });
+      },
+      at: function (now) {
+        if (!cur) return null;
+        if (!seg && q.length) seg = { from: cur, to: q.shift(), t0: now };
+        while (seg) {
+          var dur = seg.to.dur * (q.length > 1 ? 0.6 : 1);                  // 落後太多就走快一點追上
+          var k = Math.min(1, (now - seg.t0) / dur);
+          k = Math.floor(k * FRAMES + 1e-6) / FRAMES;                         // 一格切成 30 幀
+          var f = seg.from, t = seg.to;
+          cur = { x: f.x + (t.x - f.x) * k, y: f.y + (t.y - f.y) * k, r: f.r + (t.r - f.r) * k };
+          if (k < 1) break;
+          var end = seg.t0 + dur;
+          seg = q.length ? { from: cur, to: q.shift(), t0: Math.max(end, now - 40) } : null;
+          if (seg && seg.t0 > now) break;
+        }
+        return cur;
+      },
+      moving: function () { return !!seg || q.length > 0; }
+    };
+  }
+
+  // ---- 2D：笨笨畫在 SVG 的 .bd-botlayer（地圖 SVG 換新時把同一個笨笨搬過去，動畫不中斷）----
+  var bot = { m: Motion(), st: null, raw: '', g: null, arrow: null, key: '', chain: 0, last: 0 };
+  function svgEsc(t) { return String(t).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+  function arrowPts(x, y, vx, vy, len, w) {
+    var px = -vy, py = vx, sh = len * 0.55, bx = x + vx * sh, by = y + vy * sh;
+    return [[x + px * w * .35, y + py * w * .35], [bx + px * w * .35, by + py * w * .35], [bx + px * w, by + py * w],
+            [x + vx * len, y + vy * len], [bx - px * w, by - py * w], [bx - px * w * .35, by - py * w * .35],
+            [x - px * w * .35, y - py * w * .35]].map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
+  }
+  function botLabel(y, txt) {
+    return "<rect x='-24' y='" + (y - 10) + "' width='48' height='20' rx='6' fill='white' fill-opacity='.85' stroke='#555'/>" +
+           "<text x='0' y='" + y + "' text-anchor='middle' dominant-baseline='central' font-size='12'>" + txt + "</text>";
+  }
+  function buildBot(layer, svg) {
+    var st = bot.st, iso = svg.getAttribute('data-proj') === 'iso', c = +(svg.getAttribute('data-cell') || 42), h;
+    if (iso) {
+      h = "<ellipse cx='0' cy='2' rx='20' ry='10.5' fill='#000' fill-opacity='.18'/>" +
+          "<ellipse cx='0' cy='0' rx='17' ry='8.5' fill='#22324a'/><rect x='-17' y='-11' width='34' height='11' fill='#3d5a80'/>" +
+          "<ellipse cx='0' cy='-11' rx='17' ry='8.5' fill='" + st.lid + "' stroke='#3d5a80' stroke-width='1.5'/>";
+    } else {
+      h = "<circle cx='0' cy='0' r='" + (c * 0.4).toFixed(1) + "' fill='" + st.lid + "' stroke='#22324a' stroke-width='3'/>";
+    }
+    h += "<polygon class='bd-botarrow' fill='#ffb703' stroke='#5c4100' stroke-width='1.4'/>";
+    if (st.low) h += "<circle cx='9' cy='" + (iso ? -13 : -c * 0.2) + "' r='3.5' fill='#ff1744' class='bd-blink'/>";
+    if (st.think) h += botLabel(iso ? -41 : -c / 2 - 6, '🤔 …');
+    else if (st.emo) h += "<text x='" + (iso ? 0 : 16) + "' y='" + (iso ? -39 : -c / 2 + 2) + "' text-anchor='middle' dominant-baseline='central' font-size='" + (iso ? 20 : 16) + "'>" + svgEsc(st.emo) + "</text>";
+    if (!bot.g) bot.g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    bot.g.setAttribute('class', 'bd-bot');
+    bot.g.innerHTML = h;
+    bot.arrow = bot.g.querySelector('.bd-botarrow');
+    if (bot.g.parentNode !== layer) layer.appendChild(bot.g);
+    bot.key = [iso, c, st.lid, st.low, st.think, st.emo].join('|');
+    drawBot();
+  }
+  function drawBot() {
+    var g = bot.g, svg = g && g.ownerSVGElement;
+    if (!svg || !g.isConnected) return;
+    var p = bot.m.at(Date.now());
+    if (!p) return;
+    var iso = svg.getAttribute('data-proj') === 'iso', gx = Math.sin(p.r), gy = -Math.cos(p.r), cx, cy, vx, vy;
+    if (iso) {
+      var tw = +svg.getAttribute('data-tw'), th = +svg.getAttribute('data-th');
+      cx = +svg.getAttribute('data-ox') + (p.x - p.y) * tw / 2; cy = +svg.getAttribute('data-oy') + (p.x + p.y + 1) * th / 2;
+      vx = (gx - gy) * tw / 2; vy = (gx + gy) * th / 2;
+    } else {
+      var c = +svg.getAttribute('data-cell'), pad = +svg.getAttribute('data-pad');
+      cx = pad + (p.x + 0.5) * c; cy = pad + (p.y + 0.5) * c; vx = gx; vy = gy;
+    }
+    var n = Math.hypot(vx, vy) || 1; vx /= n; vy /= n;
+    g.setAttribute('transform', 'translate(' + cx.toFixed(2) + ',' + cy.toFixed(2) + ')');
+    bot.arrow.setAttribute('points', iso ? arrowPts(0, -11, vx, vy, 30, 9) : arrowPts(-vx * 6, -vy * 6, vx, vy, 30, 9));
+  }
+  function botFrames(id) {                       // requestAnimationFrame 迴圈（彈出視窗後要用新視窗的 rAF）
+    if (id !== bot.chain || !root.isConnected) return;
+    bot.last = Date.now();
+    drawBot();
+    (root.ownerDocument.defaultView || window).requestAnimationFrame(function () { botFrames(id); });
+  }
+  setInterval(function () {                      // 彈出／收回視窗時 rAF 鏈可能斷掉 → 重新接上
+    if (root.isConnected && Date.now() - bot.last > 600) { bot.chain++; botFrames(bot.chain); }
+  }, 400);
+  function botSync() {
+    var el = q('.bd-botjs');
+    if (el && el.textContent !== bot.raw) {
+      bot.raw = el.textContent;
+      try { bot.st = JSON.parse(bot.raw); } catch (err) { return; }
+      var s = bot.st;
+      bot.m.push(s.x, s.y, s.f * Math.PI / 2, (s.tick || 0.5) * 1000, Date.now());
+      speakLine(s);
+    }
+    if (!bot.st) return;
+    var svg = q('svg.bendan-board'), layer = svg && svg.querySelector('.bd-botlayer');
+    if (!layer) return;
+    var st = bot.st, key = [svg.getAttribute('data-proj') === 'iso', +(svg.getAttribute('data-cell') || 42), st.lid, st.low, st.think, st.emo].join('|');
+    if (!bot.g || bot.g.parentNode !== layer || bot.key !== key) buildBot(layer, svg);
+  }
+
+  // ===== v7：🔊 笨笨說話（瀏覽器內建語音合成，不用裝東西；Mac 有「美佳」、Chrome 有「Google 國語（臺灣）」）=====
+  var tts = { n: -1, voice: null };
+  var EMO_VOICE = { '開心': [1.45, 1.1], '得意': [1.35, 1.05], '生氣': [0.85, 1.25], '委屈': [1.25, 0.9],
+                    '害怕': [1.6, 1.3], '普通': [1.2, 1.05] };       // [音高, 語速]：跟著笨笨的情緒變
+  function pickVoice() {
+    var S = window.speechSynthesis, vs = (S && S.getVoices()) || [];
+    function find(lang, name) {
+      for (var i = 0; i < vs.length; i++) if (lang.test(vs[i].lang) && (!name || name.test(vs[i].name))) return vs[i];
+      return null;
+    }
+    return find(/zh[-_]TW/i, /Google/) || find(/zh[-_]TW/i, /Meijia|美佳/) || find(/zh[-_]TW/i) || find(/^zh/i);
+  }
+  if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = function () { tts.voice = pickVoice(); };
+  function speakLine(s) {
+    var S = window.speechSynthesis;
+    if (!S) return;
+    if (!s.tts) { if (tts.n !== -1 && S.speaking) S.cancel(); tts.n = s.sayN; return; }
+    if (s.sayN === tts.n) return;
+    var first = tts.n === -1;
+    tts.n = s.sayN;
+    if (first) return;                           // 剛打開遊戲那一句不唸（瀏覽器規定要先有互動）
+    var text = String(s.say || '').replace(/[（(][^）)]*[）)]/g, '')
+      .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '').trim();
+    if (!text) return;
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-TW';
+    tts.voice = tts.voice || pickVoice();
+    if (tts.voice) u.voice = tts.voice;
+    var pv = EMO_VOICE[s.sayEmo] || EMO_VOICE['普通'];
+    u.pitch = pv[0]; u.rate = pv[1];
+    S.cancel();                                  // 只唸最新的一句
+    S.speak(u);
+  }
+  new MutationObserver(botSync).observe(root, { subtree: true, childList: true, characterData: true });
+  botSync(); botFrames(bot.chain);
+
 /*SCENE3D*/
   setTimeout(function () { var i = input(); if (i && !root.__win) i.focus(); }, 400);
 })();
@@ -349,15 +505,16 @@ CLOSE_POPUP = ("<img src='data:,' alt='' style='display:none' onerror=\"var r=th
 
 
 class WidgetGame:
-    def __init__(self, level=0, mode="silly", tick=0.3, feedback_rounds=1, progress=None, seed=None, view="iso",
-                 stt=None):
+    def __init__(self, level=0, mode="silly", tick=0.5, feedback_rounds=1, progress=None, seed=None, view="iso",
+                 stt=None, tts=True):
         import ipywidgets as W
         self.W = W
         self.progress = progress or Progress()
         self.session = Session(level, mode, feedback_rounds, progress=self.progress, seed=seed)
         self.session.view = view
         self.tick_s = tick
-        self.say = self.session.game.cfg["intro"]
+        self.say_n = 0                              # 笨笨講了第幾句（前端看到變了就唸出來）
+        self._talk(self.session.game.cfg["intro"])
         self.events = deque(maxlen=8)
         self.future, self.future_info = None, None
         self.dirty = True
@@ -395,6 +552,9 @@ class WidgetGame:
         self.btn_info = W.ToggleButton(description="📋 關卡／成就／說明", tooltip="選關、成就與指令說明",
                                        layout=W.Layout(width="150px"))
         self.btn_quit = W.Button(description="結束", layout=W.Layout(width="60px"))
+        self.tb_tts = W.ToggleButton(value=tts, description="🔊", tooltip="笨笨說話（用瀏覽器語音唸出笨笨的回答）",
+                                     layout=W.Layout(width="48px"))
+        self.botw = W.HTML(layout=W.Layout(display="none"))     # 笨笨的即時狀態（前端連續移動＋朗讀用）
 
         self.cmd.add_class("bendan-cmd")
         self.audio_in.add_class("bendan-audio")
@@ -412,10 +572,11 @@ class WidgetGame:
         self.btn_reset.on_click(lambda _: self._reset(self.session.game.level_id))
         self.btn_next.on_click(self._on_next)
         self.btn_info.observe(self._on_info, names="value")
+        self.tb_tts.observe(lambda _: setattr(self, "dirty", True), names="value")
         self.btn_quit.on_click(lambda _: self.quit())
 
-        controls = W.HBox([self.dd_level, self.tb_mode, self.btn_view, self.btn_reset, self.btn_next, self.btn_info,
-                           self.btn_quit])
+        controls = W.HBox([self.dd_level, self.tb_mode, self.btn_view, self.tb_tts, self.btn_reset, self.btn_next,
+                           self.btn_info, self.btn_quit])
         inputrow = W.HBox([self.cmd, self.btn_send, self.mic, self.btn_stop, self.btn_home, self.btn_coax])
         left = W.VBox([self.board, self.board3d, self.bubble, inputrow, self.keys, self.history])
         right = W.VBox([self.side])
@@ -423,15 +584,31 @@ class WidgetGame:
         for w, cls in ((controls, "bendan-controls"), (inputrow, "bendan-inputrow"), (left, "bendan-left"),
                        (right, "bendan-right"), (main, "bendan-main")):
             w.add_class(cls)
-        self.box = W.VBox([self.js, self.head, controls, main, self.extra, self.audio_in, self.assets3d])
+        self.box = W.VBox([self.js, self.head, controls, main, self.extra, self.audio_in, self.assets3d, self.botw])
         self.box.add_class("bendan-game")
         self._controls = [self.cmd, self.btn_send, self.btn_stop, self.btn_home, self.btn_coax, self.dd_level,
-                          self.tb_mode, self.btn_view, self.btn_reset, self.btn_next, self.btn_info, self.btn_quit]
+                          self.tb_mode, self.btn_view, self.tb_tts, self.btn_reset, self.btn_next, self.btn_info,
+                          self.btn_quit]
         self.alive = threading.Event()
         self.alive.set()
         self._render(force=True)
         self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
+
+    def _talk(self, text):
+        """笨笨說的話：顯示在對話框；開著 🔊 時前端也會用語音唸出來（系統訊息用 self.say，不會唸）。"""
+        self.say = text
+        self.say_n += 1
+
+    def _bot_html(self, mood):
+        """笨笨的即時狀態（小小的 JSON）：前端用它畫連續移動（每格 30 幀）和朗讀笨笨說的話。"""
+        s, g = self.session, self.session.game
+        st = {"x": g.pos[0], "y": g.pos[1], "f": g.facing, "tick": self.tick_s,
+              "lid": MOOD_LID.get(mood, "#98c1d9"), "emo": EMOTION_ICON.get(s.emotion, ""),
+              "think": self.future is not None, "low": g.battery_pct < 25, "vac": g.vacuum, "drv": g.driving,
+              "sayN": self.say_n, "say": self.say, "sayEmo": s.emotion or "普通", "tts": bool(self.tb_tts.value)}
+        data = json.dumps(st, ensure_ascii=False).replace("</", "<\\/")
+        return f"<script type='application/json' class='bd-botjs'>{data}</script>"
 
     def _level_options(self):
         opts = []
@@ -524,13 +701,13 @@ class WidgetGame:
             self.dirty = True
             return
         if self.future is not None:
-            self.say = "等等，我還在想上一句！（急的話先按「停！」）"
+            self._talk("等等，我還在想上一句！（急的話先按「停！」）")
             self.dirty = True
             return
         pre = self.session.preprocess(text, source=source)
         self.events.extend(pre["events"])
         if pre["handled"]:
-            self.say = pre["say"]
+            self._talk(pre["say"])
         else:
             self.future = EXECUTOR.submit(self.session.think, text, None, pre["refuse"])
             self.future_info = {"command": text, "kind": "command", "depth": 0}
@@ -540,12 +717,12 @@ class WidgetGame:
         self.events.extend(self.session.stop())
         if self.future_info:
             self.future_info["discard"] = True    # 正在想的那句也不要了
-        self.say = "收到！緊急煞車！"
+        self._talk("收到！緊急煞車！")
         self.dirty = True
 
     def _on_home(self, _):
         self.events.extend(self.session.local_plan([{"op": "return_home"}], "回充"))
-        self.say = "好啦，回家充電。"
+        self._talk("好啦，回家充電。")
         self.dirty = True
 
     def _on_coax(self, _):
@@ -570,14 +747,14 @@ class WidgetGame:
             self._after_level_change()
         else:
             self._set_dropdown(change["old"])
-        self.say = msg
+        self._talk(msg)
         self.dirty = True
 
     def _on_next(self, _):
         ok, msg = next_level(self.session)
         if ok:
             self._after_level_change()
-        self.say = msg
+        self._talk(msg)
         self.dirty = True
 
     def _on_info(self, change):
@@ -588,7 +765,7 @@ class WidgetGame:
         ok, msg = change_level(self.session, level)
         if ok:
             self._after_level_change()
-        self.say = msg
+        self._talk(msg)
         self.dirty = True
 
     def _set_dropdown(self, value):
@@ -616,9 +793,14 @@ class WidgetGame:
         was_over = False
         while self.alive.is_set():
             try:
+                g = self.session.game
+                before = (g.steps, g.pos, g.facing, g.vacuum, g.driving)
                 ev = self.session.tick()
+                g = self.session.game
                 if ev:
                     self.events.extend(ev)
+                    self.dirty = True
+                if (g.steps, g.pos, g.facing, g.vacuum, g.driving) != before:   # v6：每走一步都要重畫，移動才連續
                     self.dirty = True
                 if self.future is not None and self.future.done():
                     fut, info = self.future, self.future_info
@@ -630,7 +812,7 @@ class WidgetGame:
                     if res is not None and not info.get("discard"):
                         self.events.extend(self.session.apply(info["command"], res, kind=info["kind"],
                                                               depth=info["depth"]))
-                        self.say = res["say"] or "……"
+                        self._talk(res["say"] or "……")
                     self.dirty = True
                 if self.stt_future is not None and self.stt_future.done():
                     fut, self.stt_future = self.stt_future, None
@@ -663,15 +845,16 @@ class WidgetGame:
                 if not self.assets3d.value:
                     from ..render.assets3d import assets_html
                     self.assets3d.value = assets_html()
-                board = scene_html(s.game, mood=mood, emotion=s.emotion, thinking=thinking)
+                board = scene_html(s.game, mood=mood, emotion=s.emotion, thinking=thinking, tick=self.tick_s)
             else:
-                board = render_svg(s.game, view=s.view, thinking=thinking, mood=mood, emotion=s.emotion, max_width=920)
+                board = render_svg(s.game, view=s.view, mood=mood, max_width=920, robot=False)   # 笨笨由前端畫
             values = {
                 "board": board,
                 "side": side_html(s, self.events),
                 "bubble": bubble_html(s, self.say, thinking),
                 "history": history_html(s, limit=12),
                 "head": self._head_html(),
+                "botw": self._bot_html(mood),
             }
         self.board3d.layout.display = None if s.view == "3d" else "none"
         for name, value in values.items():
@@ -689,10 +872,12 @@ class WidgetGame:
         self._render(force=True)
 
 
-def play_widgets(level=None, mode="silly", tick=0.3, feedback_rounds=1, unlock_all=False, seed=None, view="iso",
-                 voice="auto"):
+def play_widgets(level=None, mode="silly", tick=0.5, feedback_rounds=1, unlock_all=False, seed=None, view="iso",
+                 voice="auto", tts=True):
     """▶️ 遊戲視窗（推薦）。level=None 會從「還沒破的第一關」開始。
 
+    tick：笨笨每移動一格（或轉 90 度）要幾秒；畫面上分成 30 幀播放（0.5 秒 ≈ 60 fps）。
+    tts：True＝笨笨的回答用瀏覽器的語音唸出來（畫面上的 🔊 可以隨時關掉）。
     voice："auto"＝有裝 Whisper 就用（按住 🎤 說話）；"off"＝不用 Whisper（🎤 改用瀏覽器語音辨識）；
     也可以直接給 `bendan.voice.connect_stt(...)` 回傳的後端。
     """
@@ -718,6 +903,7 @@ def play_widgets(level=None, mode="silly", tick=0.3, feedback_rounds=1, unlock_a
             stt = voice
     if _ACTIVE_UI is not None:
         _ACTIVE_UI.quit()
-    _ACTIVE_UI = WidgetGame(level, mode, tick, feedback_rounds, progress=progress, seed=seed, view=view, stt=stt)
+    _ACTIVE_UI = WidgetGame(level, mode, tick, feedback_rounds, progress=progress, seed=seed, view=view, stt=stt,
+                            tts=tts)
     display(_ACTIVE_UI.box)
     return _ACTIVE_UI

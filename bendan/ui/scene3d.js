@@ -288,7 +288,7 @@
     var staticGroup = new THREE.Group(), dynGroup = new THREE.Group(), roomGroup = new THREE.Group();
     scene.add(staticGroup, dynGroup, roomGroup);
     var staticKey = '', fogBoxes = {}, occluders = [], pets = { cat: [], dog: [] }, prevDirt = {}, sparks = [];
-    var target = { x: 0, z: 0, rot: 0 }, first = true, moving = 0, cam = 'follow', yaw = 0.6, dist = 0;
+    var target = { x: 0, z: 0, rot: 0 }, first = true, moving = 0, driving = false, vac = false, motion = Motion(), cam = 'follow', yaw = 0.6, dist = 0;
     var center = new THREE.Vector3(), camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), dark = false, thinking = false;
 
     function buildStatic(st) {
@@ -399,11 +399,6 @@
         if (g) { g.position.set(x, 0, y); dynGroup.add(g); }
       });
       syncPets('cat', cats); syncPets('dog', dogs);
-      st.aids.forEach(function (a) {
-        var num = /^[0-9]+$/.test(a[2]);
-        var bg = num ? '#ffb703' : (a[2] === '左' ? '#3a86ff' : a[2] === '右' ? '#2a9d8f' : '#8d99ae');
-        var s = sprite(a[2], 0.3, bg, num ? '#3b2a00' : '#fff'); s.position.set(a[0], 0.16, a[1]); dynGroup.add(s);
-      });
       // 禁區：半透明紅色地板＋標示
       while (roomGroup.children.length) roomGroup.remove(roomGroup.children[0]);
       var forb = {};
@@ -419,6 +414,8 @@
       moving = Math.max(moving, Math.abs(R.x - target.x) + Math.abs(R.y - target.z) + Math.abs(want - target.rot) > 0.01 ? 1 : 0);
       target.x = R.x; target.z = R.y; target.rot += Math.atan2(Math.sin(want - target.rot), Math.cos(want - target.rot));
       lidMat.color.set(R.lid); thinking = !!R.thinking;
+      driving = !!R.driving; vac = !!R.vac;
+      motion.push(R.x, R.y, R.facing * Math.PI / 2, (st.tick || 0.5) * 1000, Date.now());
       ringMat.color.set(R.low ? '#ef4444' : '#38bdf8'); ringMat.emissive.set(R.low ? '#ef4444' : '#38bdf8');
       head.material.map = texCache['h' + (R.thinking ? '🤔' : R.emotion)] || (texCache['h' + (R.thinking ? '🤔' : R.emotion)] = spriteTex(R.thinking ? '🤔' : (R.emotion || ' ')));
       head.material.needsUpdate = true;
@@ -459,10 +456,11 @@
       if (!cvs.isConnected || cvs.offsetParent === null) return;
       var W = host.clientWidth || 640, H = Math.round(W * 0.6);
       if (cvs.width !== Math.round(W * renderer.getPixelRatio())) { renderer.setSize(W, H); camera.aspect = W / H; camera.updateProjectionMatrix(); }
-      var dx = target.x - robot.position.x, dz = target.z - robot.position.z, dr = target.rot - robot.rotation.y;
-      robot.position.x += dx * Math.min(1, dt * 8); robot.position.z += dz * Math.min(1, dt * 8); robot.rotation.y += dr * Math.min(1, dt * 9);
-      var busy = Math.abs(dx) + Math.abs(dz) + Math.abs(dr) > 0.02;
-      brushes.forEach(function (b, i) { b.rotation.y += (i ? -1 : 1) * dt * (busy ? 22 : 3); });
+      // v7 連續移動：跟 2D 共用 Motion，每移動一格（或轉 90 度）分成 30 幀
+      var mp = motion.at(Date.now());
+      if (mp) { robot.position.x = mp.x; robot.position.z = mp.y; robot.rotation.y = -mp.r; }
+      var busy = motion.moving() || driving;
+      brushes.forEach(function (b, i) { b.rotation.y += (i ? -1 : 1) * dt * (vac ? 40 : busy ? 22 : 3); });
       robot.position.y = busy ? Math.sin(clock.elapsedTime * 30) * 0.003 : 0;
       ringMat.emissiveIntensity = thinking ? 1 + Math.sin(clock.elapsedTime * 6) * 0.9 : 1.6;
       ['cat', 'dog'].forEach(function (k) {

@@ -29,6 +29,7 @@ from .gameplay import (BloodPressure, IncidentDirector, Mood, Progress, Scoreboa
                        check_achievements, stars_text)
 from .gameplay.quirks import limit_plan, maybe_quirk, quirk_chance
 from .world import INTERRUPT_EVENTS, QUIET_EVENTS, E, Game
+from .world.constants import MOVE_OPS
 
 
 class JsonlLogger:
@@ -68,7 +69,23 @@ HOME_RE = re.compile(r"回充|充電|回家|回去充")
 # 整句只是「回去充電」→ 跟「停」一樣直接處理（實測：模型常在 return_home 前自己加「前進 10 格」，撞牆就回不了家）
 GO_HOME_RE = re.compile(r"\s*(請|麻煩|拜託)?\s*(你|笨笨)?\s*(快)?\s*(回到?充電座|回去充電座?|回充電座?|回充|回家|去充電)"
                         r"\s*(吧|啦|喔|了|好嗎|謝謝)?[!！。.~～\s]*")
+# v6 連續移動：「往前」「前進」「直走」沒講距離 → 一直開到喊停。
+# 實測 Qwen2.5-7B 賣蠢模式常把「往前」寫成 forward 1（只走一小格），Prompt 規定了也壓不住 → 由程式校正。
+DRIVE_RE = re.compile(r"往前|向前|前進|直走|直直走|衝")
+COUNT_RE = re.compile(r"([0-9]+|[一二兩三四五六七八九十幾半])\s*(格|步|公尺|米|下|點)|一點|一下|一些|一小段")
 EXECUTOR = ThreadPoolExecutor(max_workers=2)
+
+
+def drive_fix(command, actions):
+    """指令是「往前（沒講距離）」但計畫是 forward → 改成 drive；drive 之後的動作永遠輪不到，直接去掉。"""
+    if not DRIVE_RE.search(command) or COUNT_RE.search(command) or not any(a["op"] == "forward" for a in actions):
+        return actions
+    out = []
+    for a in actions:
+        out.append({"op": "drive"} if a["op"] == "forward" else a)
+        if out[-1]["op"] == "drive":
+            break
+    return out
 
 
 class Session:
@@ -274,6 +291,10 @@ class Session:
                 self.quotes.append({"say": result["say"], "emotion": result.get("emotion"), "command": command,
                                     "refused": bool(result.get("refused")), "kind": kind})
             extra, flags = [], []
+            if kind == "command" and not result.get("refused"):
+                fixed = drive_fix(command, result.get("actions", []))
+                if fixed != result.get("actions"):
+                    result = dict(result, actions=fixed)
             llm_actions = result.get("actions", [])
             if (self.gameplay and kind in ("command", "feedback")
                     and not result.get("refused") and not result.get("dazed")):
@@ -288,6 +309,11 @@ class Session:
                 if acts is not llm_actions:
                     result = dict(result, actions=acts, llm_actions=llm_actions,
                                   quirk=ev["quirk"] if ev else None, forgot=any(e["type"] == "forgot" for e in extra))
+            if (self.game.driving and kind in ("command", "feedback")
+                    and not any(a["op"] in MOVE_OPS for a in result["actions"])):
+                # v6 連續移動：開車中只說「左轉」「開吸塵」或聊天 → 做完繼續往前開（像開車打方向盤），要停得喊「停」
+                result = dict(result, actions=list(result["actions"]) + [{"op": "drive"}], steered=True)
+                flags.append("🚗 繼續開")
             if self.guard_on and kind != "local":
                 safe, note = guard_forbidden(self.game, result["actions"])
                 if note:

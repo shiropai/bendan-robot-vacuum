@@ -8,7 +8,8 @@ from collections import Counter, deque
 
 from ..world.constants import KNOWN_ROOMS, QUIET_EVENTS, ROOM_ALIASES
 
-OP_TEXT = {"turn_left": "左轉", "turn_right": "右轉", "suck": "吸", "return_home": "回充", "stop": "停"}
+OP_TEXT = {"turn_left": "左轉", "turn_right": "右轉", "suck": "吸", "return_home": "回充", "stop": "停",
+           "drive": "一直往前開", "vacuum_on": "開吸塵", "vacuum_off": "關吸塵"}
 
 
 def actions_to_text(actions):

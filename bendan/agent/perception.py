@@ -22,7 +22,7 @@ def rel(game, target):
     return "、".join(parts) or "就在你腳下"
 
 
-def scan(game, d, max_dist=8):
+def scan(game, d, max_dist=16):
     """沿某個方向看出去：能走幾格、路上有什麼、最後撞到什麼。"""
     dx, dy = DIRS[d]
     x, y = game.pos
@@ -101,7 +101,10 @@ def describe_world(game, hints=False, vision=None):
     """vision：笨笨看得到幾格內的東西（None＝整間屋子的灰塵位置都知道）。"""
     lines = [f"你在「{game.room_of(game.pos)}」，面向{DIR_NAMES[game.facing]}方。這間屋子有：{'、'.join(game.room_names())}。"]
     for label, off in [("前方", 0), ("右手邊", 1), ("左手邊", 3), ("後方", 2)]:
-        lines.append(f"- {label}：{scan(game, (game.facing + off) % 4, max_dist=vision or 8)}")
+        lines.append(f"- {label}：{scan(game, (game.facing + off) % 4, max_dist=vision or 16)}")
+    state = ["你現在正在一直往前開（等主人喊停）" if game.driving else "你現在停著",
+             "吸塵模式：" + ("開（走過的格子會順便吸）" if game.vacuum else "關")]
+    lines.append("。".join(state) + "。")
     here = game.objects.get(game.pos)
     if game.pos in game.dirt:
         lines.append("你腳下這格就有灰塵！")

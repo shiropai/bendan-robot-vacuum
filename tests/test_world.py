@@ -1,6 +1,7 @@
 import pytest
 
 from bendan.world import CAMPAIGN, LEVELS, Game, check_level, run_to_end
+from bendan.world.constants import BATTERY_COST
 from bendan.world.mapgen import daily_level, random_level
 
 
@@ -14,6 +15,9 @@ def test_random_maps_are_solvable(seed):
     cfg = random_level(f"t{seed}")
     assert len({len(r) for r in cfg["map"]}) == 1
     assert check_level(f"random:t{seed}") == []
+
+
+pytestmark = pytest.mark.usefixtures("small_maps")   # 規則測試用原始小地圖（v6 放大地圖另有測試）
 
 
 def test_daily_is_deterministic():
@@ -130,11 +134,12 @@ def test_over_game_ignores_steps():
 
 
 def test_low_battery_warns_when_only_enough_to_get_home():
-    """電池小的關卡：還沒到 25%，但電量只夠走回充電座時就要先警告。"""
-    g = Game(5)                          # 電池 60，充電座在 (1,1)
-    g.pos, g.facing = (12, 7), 3         # 右下角，離充電座很遠
+    """電池小的關卡：還沒到 25%，但電量只夠走回充電座時就要先警告（用 v6 放大後的地圖）。"""
+    g = Game(5, scale=2)                 # 電池 60
+    far = max((p for p in g.floor_tiles() if g.find_path(p, g.home)), key=lambda p: len(g.find_path(p, g.home)))
+    g.pos, g.facing = far, 3             # 離充電座最遠的角落
     d = g.home_distance()
-    g.battery = d + 6.1                  # 約 38%，高於 25%（轉一次 −0.2 後就只夠回家）
+    g.battery = d * BATTERY_COST["move"] + 6.1   # 高於 25%（轉一次 −0.2 後就只夠回家）
     g.set_plan([{"op": "turn_left"}])
     types = [e["type"] for e in run_to_end(g)]
     assert "low_battery" in types and g.low_battery and g.battery_pct > 25

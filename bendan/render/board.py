@@ -70,32 +70,6 @@ class _Svg:
         self.text(x, y, s, size=size, fill=color, weight="bold")
 
 
-# ---------- 方向輔助 ----------
-def direction_aids(game):
-    """回傳 {格子: 標籤}：前方雷射（1、2、3…）、左、右、後。"""
-    aids = {}
-    x, y = game.pos
-    dx, dy = DIRS[game.facing]
-    for k in range(1, 13):
-        p = (x + dx * k, y + dy * k)
-        if game.is_blocked(p) or not game.visible(p):
-            break
-        aids[p] = str(k)
-    for off, name in ((3, "左"), (1, "右"), (2, "後")):
-        ddx, ddy = DIRS[(game.facing + off) % 4]
-        p = (x + ddx, y + ddy)
-        if not game.is_blocked(p) and game.visible(p) and p not in aids:
-            aids[p] = name
-    return aids
-
-
-AID_COLOR = {"左": "#3a86ff", "右": "#2a9d8f", "後": "#8d99ae"}
-
-
-def _aid_color(tag):
-    return AID_COLOR.get(tag, "#f77f00")
-
-
 def _floor_color(game, p):
     room = game.room_of(p)
     return FORBIDDEN_FILL if room in game.forbidden else ROOM_COLORS.get(room, ROOM_COLORS["客廳"])
@@ -111,7 +85,7 @@ def _end_banner(svg, game, W, H):
 
 
 # ---------- 2.5D 等角 ----------
-def _iso_svg(game, thinking, mood, emotion):
+def _iso_svg(game, thinking, mood, emotion, robot=True):
     pad, top = 16, WALL_TALL + 46
     W = (game.w + game.h) * TW / 2 + pad * 2
     H = (game.w + game.h) * TH / 2 + top + pad + 8
@@ -132,8 +106,6 @@ def _iso_svg(game, thinking, mood, emotion):
         svg.poly([up(back), up(right), up(front), up(left)], color, edge)
 
     svg = _Svg()
-    aids = direction_aids(game) if not game.over else {}
-    front = game.front()
     tiles = sorted(((x, y) for y in range(game.h) for x in range(game.w)), key=lambda p: (p[0] + p[1], p[0]))
 
     def near_seen(p):
@@ -148,10 +120,6 @@ def _iso_svg(game, thinking, mood, emotion):
         if p in game.walls:
             continue
         svg.poly(diamond(*p), _floor_color(game, p), "#d9534f" if game.in_forbidden(p) else "#cbbfa9")
-        if p in aids:
-            tint = ARROW if p == front else _aid_color(aids[p])
-            op = 0.55 if p == front else 0.22
-            svg.poly(diamond(*p, inset=0.06), tint, extra=f"fill-opacity='{op}'")
 
     # 2) 地上的東西（灰塵、充電座、方向標示）
     for p in tiles:
@@ -166,10 +134,6 @@ def _iso_svg(game, thinking, mood, emotion):
             for ox_, oy_, r in ((-7, -1, 7), (6, 2, 5.5), (0, 5, 4.5)):
                 svg.add(f"<ellipse cx='{_f(cx + ox_)}' cy='{_f(cy + oy_)}' rx='{_f(r * 1.5)}' ry='{_f(r * 0.75)}' "
                         f"fill='#7a5a3a' fill-opacity='0.9'/>")
-        if p in aids and p != game.pos:
-            tag = aids[p]
-            svg.badge(cx, cy + (8 if p in game.dirt or p == game.home else 0), tag,
-                      ARROW if tag.isdigit() else _aid_color(tag), "#3b2a00" if tag.isdigit() else "white")
 
     # 3) 牆、物件、機器人（畫家演算法：由後往前）
     for p in tiles:
@@ -192,8 +156,10 @@ def _iso_svg(game, thinking, mood, emotion):
                 svg.add(f"<ellipse cx='{_f(cx)}' cy='{_f(cy + 2)}' rx='{14 if big else 10}' ry='{6 if big else 4}' "
                         "fill='#000' fill-opacity='0.15'/>")
                 svg.text(cx, cy - (13 if big else 8), EMOJI[obj], size=26 if big else 19, emoji=True)
-        if p == game.pos:
+        if robot and p == game.pos:
             _iso_robot(svg, game, P, cx, cy, thinking, mood, emotion)
+    if not robot:
+        svg.add("<g class='bd-botlayer'></g>")    # 遊戲視窗：笨笨由前端畫在這一層，一格分 30 幀連續移動
 
     # 4) 房間名稱、指北針、結束畫面
     for name, (x0, y0, x1, y1) in game.rooms.items():
@@ -206,7 +172,7 @@ def _iso_svg(game, thinking, mood, emotion):
             svg.label(cx, cy - 18, name, color="#555")
     _compass(svg, 48, 52, game.facing, lambda d: (P(*DIRS[d])[0] - P(0, 0)[0], P(*DIRS[d])[1] - P(0, 0)[1]))
     _end_banner(svg, game, W, H)
-    return W, H, svg
+    return W, H, svg, {"proj": "iso", "ox": ox, "oy": oy, "tw": TW, "th": TH}
 
 
 def _iso_robot(svg, game, P, cx, cy, thinking, mood, emotion):
@@ -268,12 +234,10 @@ def _shade(color, k):
 
 
 # ---------- 俯視 ----------
-def _top_svg(game, thinking, mood, emotion):
+def _top_svg(game, thinking, mood, emotion, robot=True):
     pad, side = 12, 96
     W, H = game.w * CELL + pad * 2 + side, game.h * CELL + pad * 2
     svg = _Svg()
-    aids = direction_aids(game) if not game.over else {}
-    front = game.front()
 
     def C(x, y):
         return pad + x * CELL, pad + y * CELL
@@ -291,10 +255,6 @@ def _top_svg(game, thinking, mood, emotion):
             fill = _floor_color(game, p)
             svg.add(f"<rect x='{X}' y='{Y}' width='{CELL}' height='{CELL}' fill='{fill}' stroke='#d6ccb8'/>")
             mx, my = X + CELL / 2, Y + CELL / 2
-            if p in aids and p != game.pos:
-                tint = ARROW if p == front else _aid_color(aids[p])
-                svg.add(f"<rect x='{X + 2}' y='{Y + 2}' width='{CELL - 4}' height='{CELL - 4}' rx='5' fill='{tint}' "
-                        f"fill-opacity='{0.5 if p == front else 0.2}'/>")
             if p == game.home:
                 svg.add(f"<rect x='{X + 5}' y='{Y + 5}' width='{CELL - 10}' height='{CELL - 10}' rx='6' fill='#2a9d8f'/>")
                 svg.text(mx, my, "🔋", size=18, emoji=True)
@@ -304,10 +264,6 @@ def _top_svg(game, thinking, mood, emotion):
             obj = game.objects.get(p)
             if obj:
                 svg.text(mx, my, EMOJI[obj], size=24 if obj in ("cat", "dog") else 20, emoji=True)
-            if p in aids and p != game.pos:
-                tag = aids[p]
-                svg.badge(X + CELL - 9, Y + 9, tag, ARROW if tag.isdigit() else _aid_color(tag),
-                          "#3b2a00" if tag.isdigit() else "white", r=8, size=10)
     for name, (x0, y0, x1, y1) in game.rooms.items():
         if game.dark and not any(game.visible((x, y)) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)):
             continue
@@ -316,39 +272,49 @@ def _top_svg(game, thinking, mood, emotion):
             svg.label(cx, cy, f"🚫 {name}（禁區）", color="#c1121f", border="#d9534f", size=10)
         else:
             svg.label(cx, cy, name, color="#555", size=10)
-    # 機器人
-    x, y = game.pos
-    X, Y = C(x, y)
-    cx, cy = X + CELL / 2, Y + CELL / 2
-    svg.add(f"<circle cx='{_f(cx)}' cy='{_f(cy)}' r='{CELL * 0.4:.1f}' fill='{MOOD_LID.get(mood, '#98c1d9')}' "
-            "stroke='#22324a' stroke-width='3'/>")
-    dx, dy = DIRS[game.facing]
-    _arrow(svg, cx - dx * 6, cy - dy * 6, dx, dy, length=30, width=9)
-    if thinking:
-        svg.label(cx, Y - 6, "🤔 …", size=12, border="#555")
-    elif emotion in EMOTION_ICON:
-        svg.text(cx + 16, Y + 2, EMOTION_ICON[emotion], size=16, emoji=True)
+    # 機器人（遊戲視窗裡由前端畫，才能連續移動）
+    if robot:
+        x, y = game.pos
+        X, Y = C(x, y)
+        cx, cy = X + CELL / 2, Y + CELL / 2
+        svg.add(f"<circle cx='{_f(cx)}' cy='{_f(cy)}' r='{CELL * 0.4:.1f}' fill='{MOOD_LID.get(mood, '#98c1d9')}' "
+                "stroke='#22324a' stroke-width='3'/>")
+        dx, dy = DIRS[game.facing]
+        _arrow(svg, cx - dx * 6, cy - dy * 6, dx, dy, length=30, width=9)
+        if thinking:
+            svg.label(cx, Y - 6, "🤔 …", size=12, border="#555")
+        elif emotion in EMOTION_ICON:
+            svg.text(cx + 16, Y + 2, EMOTION_ICON[emotion], size=16, emoji=True)
+    else:
+        svg.add("<g class='bd-botlayer'></g>")
     _compass(svg, W - side / 2, 56, game.facing, lambda d: DIRS[d])
     _end_banner(svg, game, W - side, H)
-    return W, H, svg
+    return W, H, svg, {"proj": "top", "pad": pad, "cell": CELL}
 
 
-def render_svg(game, view="iso", thinking=False, mood=None, emotion=None, max_width=760):
-    """把目前的世界畫成 SVG 字串。view："iso"（2.5D）或 "top"（俯視）。"""
-    W, H, svg = (_top_svg if view == "top" else _iso_svg)(game, thinking, mood, emotion)
+def render_svg(game, view="iso", thinking=False, mood=None, emotion=None, max_width=760, robot=True):
+    """把目前的世界畫成 SVG 字串。view："iso"（2.5D）或 "top"（俯視）。
+
+    robot=False：不畫笨笨，只留一個空的 `.bd-botlayer` 和投影參數（data-*），
+    遊戲視窗的前端會把笨笨畫在那一層，每移動一格分成 30 幀播放（連續移動）。
+    """
+    W, H, svg, proj = (_top_svg if view == "top" else _iso_svg)(game, thinking, mood, emotion, robot=robot)
     body = "".join(svg.parts)
-    return (f"<svg class='bendan-board' viewBox='0 0 {_f(W)} {_f(H)}' xmlns='http://www.w3.org/2000/svg' "
+    data = " ".join(f"data-{k}='{v}'" for k, v in proj.items())
+    return (f"<svg class='bendan-board' {data} viewBox='0 0 {_f(W)} {_f(H)}' xmlns='http://www.w3.org/2000/svg' "
             f"style='width:100%;max-width:{max_width}px;height:auto;display:block;margin:0 auto'>"
             f"<rect width='100%' height='100%' fill='#fbf8f2' rx='12'/>{body}</svg>")
 
 
 def facing_text(game):
-    """「面向東 ➡｜前方可以走 3 格」這類文字（HUD 用）。"""
+    """「面向東 ➡｜前方是牆壁」這類文字（HUD 用）。v7 不再顯示格數（連續移動用不到），只在快撞到時提醒。"""
     from ..world.constants import DIR_ARROWS
     x, y = game.pos
     dx, dy = DIRS[game.facing]
     k = 0
-    while not game.is_blocked((x + dx * (k + 1), y + dy * (k + 1))) and k < 30:
+    while not game.is_blocked((x + dx * (k + 1), y + dy * (k + 1))) and k < 60:
         k += 1
     what = game.what_at((x + dx * (k + 1), y + dy * (k + 1)))
-    return f"面向{DIR_NAMES[game.facing]} {DIR_ARROWS[game.facing]}｜前方可走 {k} 格（再過去是{what}）"
+    near = "（快撞到了！）" if k <= 1 else ""
+    state = ("｜🚗 前進中，喊「停」才會停" if game.driving else "") + ("｜🌀 吸塵中" if game.vacuum else "")
+    return f"面向{DIR_NAMES[game.facing]} {DIR_ARROWS[game.facing]}｜前方是{what}{near}{state}"
