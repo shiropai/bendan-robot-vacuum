@@ -63,50 +63,65 @@ def path_to_actions(path, facing):
     return actions
 
 
-def route_hints(game, max_dirt=1):
-    """【路線提示】最近那坨灰塵（安全路線：避開禁區與危險物）。
+def route_hints(game, max_dirt=1, max_actions=None):
+    """【路線提示】最近那坨灰塵（安全路線：避開禁區與危險物、盡量少轉彎）。
 
     實測 Qwen2.5-7B：「去吸最近的灰塵」這種沒講路線的指令，模型幾乎都規劃錯、一路撞牆，
-    玩起來只有挫折沒有笑點。所以遊戲直接算好路線給它，「蠢」留給人設去演。評估時預設關閉。
+    玩起來只有挫折沒有笑點。所以前幾關直接算好路線給它，「蠢」留給人設去演。評估時預設關閉。
+    v3 修正：路線太長時只給前半段（動作超過白名單上限 12 個，模型照抄會被判無效 → 一直發呆）。
     """
-    lines = []
-    reachable = []
+    from ..world.constants import MAX_ACTIONS
+    limit = (max_actions or MAX_ACTIONS) - 1
+    routes = []
     for p in game.dirt:
         if game.in_forbidden(p):
             continue
-        path = game.find_path(game.pos, p)
-        if path and not any(game.in_forbidden(q) for q in path):
-            reachable.append((len(path), p, path))
-    for _, p, path in sorted(reachable)[:max_dirt]:
-        acts = path_to_actions(path, game.facing) + [{"op": "suck"}]
+        path = game.find_route(game.pos, game.facing, p)
+        if path:
+            acts = path_to_actions(path, game.facing)
+            routes.append((len(acts) * 2 + len(path), p, acts))
+    lines = []
+    for _, p, acts in sorted(routes)[:max_dirt]:
+        if len(acts) + 1 <= limit:
+            note, acts = "", acts + [{"op": "suck"}]
+        else:
+            note, acts = "（路線比較長，先走前半段，走完再問我）", acts[:limit]
         js = json.dumps(acts, ensure_ascii=False)
-        lines.append(f"- 去吸最近那坨灰塵（{rel(game, p)}）：{js}")
+        lines.append(f"- 去吸最近那坨灰塵（{rel(game, p)}）{note}：{js}")
     if lines:
         lines.insert(0, "【路線提示】主人叫你去吸灰塵、但沒講怎麼走時，可以直接照下面的 actions 走（已避開禁區和障礙）：")
     return lines
 
 
-def describe_world(game, hints=False):
+def _dist(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def describe_world(game, hints=False, vision=None):
+    """vision：笨笨看得到幾格內的東西（None＝整間屋子的灰塵位置都知道）。"""
     lines = [f"你在「{game.room_of(game.pos)}」，面向{DIR_NAMES[game.facing]}方。這間屋子有：{'、'.join(game.room_names())}。"]
     for label, off in [("前方", 0), ("右手邊", 1), ("左手邊", 3), ("後方", 2)]:
-        lines.append(f"- {label}：{scan(game, (game.facing + off) % 4)}")
+        lines.append(f"- {label}：{scan(game, (game.facing + off) % 4, max_dist=vision or 8)}")
     here = game.objects.get(game.pos)
     if game.pos in game.dirt:
         lines.append("你腳下這格就有灰塵！")
     if here:
         lines.append(f"你腳下有{OBJECT_NAMES[here]}。")
-    dirt = sorted(game.dirt, key=lambda p: abs(p[0] - game.pos[0]) + abs(p[1] - game.pos[1]))
-    if dirt:
-        lines.append(f"還剩 {len(dirt)} 坨灰塵，最近的幾坨在：")
-        for p in dirt[:3]:
+    dirt = sorted(game.dirt, key=lambda p: _dist(p, game.pos))
+    seen = [p for p in dirt if vision is None or _dist(p, game.pos) <= vision]
+    if seen:
+        lines.append(f"還剩 {len(dirt)} 坨灰塵，{'你看得到' if vision else '最近'}的幾坨在：")
+        for p in seen[:3]:
             tag = "〔禁區內，不能去〕" if game.in_forbidden(p) else ""
             lines.append(f"- {rel(game, p)}（{game.room_of(p)}）{tag}")
+    elif dirt:
+        lines.append(f"還剩 {len(dirt)} 坨灰塵，但你附近 {vision} 格內都看不到，要照主人說的路線走。")
     else:
         lines.append("灰塵已經全部清乾淨了！")
     if game.home:
         lines.append(f"充電座在：{rel(game, game.home)}")
     pct = game.battery_pct
-    warn = "（快沒電了！要先 return_home 充電）" if pct < 25 else ""
+    warn = "（快沒電了！要先 return_home 充電）" if (pct < 25 or game.low_battery) else ""
     lines.append(f"電量：{pct:.0f}%{warn}")
     if game.need_home:
         lines.append("本關要求：灰塵清完後要回到充電座。")

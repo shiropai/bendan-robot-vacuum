@@ -9,29 +9,29 @@
     ├── agent/           大腦：Prompt、世界描述、記憶、JSON 解析驗證
     ├── gameplay/        玩法：心情、血壓、計分、突發事件、成就、存檔
     ├── session.py       Agent 迴圈＋玩法系統＋非同步＋Log
-    ├── render/          等角 2.5D 畫面、HUD、純文字地圖
-    ├── ui/              文字模式、即時模式（ipywidgets）
+    ├── render/          SVG 遊戲畫面（2.5D／俯視＋方向標示）、HUD、純文字地圖
+    ├── ui/              遊戲視窗（ipywidgets，可彈出成獨立視窗）、文字模式
     └── evaluation/      照做率、格式正確率、記憶遵守率、心情實驗
 
 最快開始：
-    from bendan import llm, play
+    from bendan import llm, play_widgets
     llm.connect()
-    play(level=0)
+    play_widgets()          # 遊戲視窗；文字模式用 play()
 """
 from . import config, llm
 from .session import Session
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"
 
 
-PACKAGES = {"openai": "連線課程 LLM", "matplotlib": "2.5D 畫面、評估圖表", "pandas": "評估",
-            "ipywidgets": "即時模式"}
+PACKAGES = {"openai": "連線課程 LLM", "ipywidgets": "遊戲視窗（推薦的玩法）", "pandas": "評估",
+            "matplotlib": "評估圖表（遊戲畫面不需要）"}
 
 
 def check_env(verbose=True):
     """檢查這個 Kernel 有沒有需要的套件和 API 設定。
 
-    實測課程 JupyterHub：「Python (Lab 1)」只有 openai，沒有 matplotlib／pandas／ipywidgets；
+    實測課程 JupyterHub：「Python (Lab 1)」只有 openai，沒有 ipywidgets／pandas／matplotlib；
     「Python 3 (ipykernel)」全部都有 → 建議用 Python 3 (ipykernel)。
     """
     import importlib.util
@@ -45,7 +45,7 @@ def check_env(verbose=True):
         if missing:
             print("\n👉 缺少套件：在課程 JupyterHub 請把 Kernel 換成「Python 3 (ipykernel)」"
                   "（右上角的 Kernel 名稱 → 選擇），它已經裝好全部套件。"
-                  + ("沒有 matplotlib 時遊戲會改用 emoji 文字地圖。" if "matplotlib" in missing else ""))
+                  + ("沒有 ipywidgets 時只能玩文字模式 play()。" if "ipywidgets" in missing else ""))
     return {"missing": missing, "api": api}
 
 

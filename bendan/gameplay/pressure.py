@@ -7,7 +7,8 @@
 EVENT_BP = {
     "collision": 5, "lego": 9, "tangled": 7, "jammed": 9, "sucked_cat": 14, "sucked_dog": 12,
     "entered_forbidden": 18, "smeared": 25, "slip": 3, "suck_water": 12, "doorbell": 4,
-    "out_of_battery": 20, "no_path": 4, "dazed": 6, "refused": 5, "suck_empty": 1,
+    "out_of_battery": 20, "no_path": 4, "dazed": 6, "refused": 5, "suck_empty": 1, "quirk": 4, "forgot": 3,
+    "leak": 2,
     "cleaned": -4, "charged": -2, "level_clear": -20,
 }
 

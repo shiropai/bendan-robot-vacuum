@@ -3,12 +3,13 @@
 ```
 玩家指令 ─► preprocess（語氣分析→心情/血壓、禁區寫入記憶、「停」不經 LLM、決定笨笨要不要鬧彆扭）
          ─► think（背景執行緒呼叫 LLM，畫面不卡住）
-         ─► apply（動作放進佇列，取代舊計畫）
+         ─► apply（記性差→截斷、恍神→改計畫、護欄→攔禁區，再放進佇列取代舊計畫）
          ─► tick（每次走一步 → 突發事件 → 心情/血壓/分數 → 失敗判定）
          ─► 計畫結束：寫 log、寫記憶；若被中斷 → 把事件回饋給 LLM 再回應一次（閉環）
          ─► 關卡結束：結算星級、檢查成就、存檔
 ```
-每一回合寫成一行 JSON 到 `logs/game_log.jsonl`，評估模組會自動算指標。
+每一回合寫成一行 JSON 到 `logs/game_log.jsonl`，評估模組會自動算指標；
+同時記在 `session.history`（畫面上對話框下方的「指令紀錄」）。
 
 `gameplay=False` 會關掉心情／血壓／突發事件／計分（＝原始版本），評估時用來公平比較模型。
 """
@@ -23,10 +24,11 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config, llm
-from .agent import Agent, Memory, guard_forbidden, update_rules_from_text
+from .agent import Agent, Memory, actions_to_text, guard_forbidden, update_rules_from_text
 from .gameplay import (BloodPressure, IncidentDirector, Mood, Progress, Scoreboard, analyze_tone,
                        check_achievements, stars_text)
-from .world import INTERRUPT_EVENTS, E, Game
+from .gameplay.quirks import limit_plan, maybe_quirk, quirk_chance
+from .world import INTERRUPT_EVENTS, QUIET_EVENTS, E, Game
 
 
 class JsonlLogger:
@@ -63,6 +65,9 @@ def pick_quote(quotes):
 
 STOP_RE = re.compile(r"\s*(停|停止|停下|停下來|煞車|別動|stop)[!！。.\s]*", re.I)
 HOME_RE = re.compile(r"回充|充電|回家|回去充")
+# 整句只是「回去充電」→ 跟「停」一樣直接處理（實測：模型常在 return_home 前自己加「前進 10 格」，撞牆就回不了家）
+GO_HOME_RE = re.compile(r"\s*(請|麻煩|拜託)?\s*(你|笨笨)?\s*(快)?\s*(回到?充電座|回去充電座?|回充電座?|回充|回家|去充電)"
+                        r"\s*(吧|啦|喔|了|好嗎|謝謝)?[!！。.~～\s]*")
 EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 
@@ -77,6 +82,7 @@ class Session:
         self.gameplay = gameplay
         self.guardrail = guardrail             # True＝程式攔截闖禁區的計畫（新手友善；關掉才看得到 LLM 闖禁區的笑點）
         self.seed = seed
+        self.view = "iso"                     # 畫面視角：iso＝2.5D、top＝俯視（UI 用）
         self.game = None
         self.reset(level_id)
 
@@ -107,6 +113,7 @@ class Session:
             self.new_achievements = []
             self.quotes = []               # 笨笨講過的話（結算時挑最好笑的）
             self.emotion = None
+            self.history = []              # 指令紀錄（畫面上對話框下方）
 
     # ---------- 小工具 ----------
     @property
@@ -119,6 +126,60 @@ class Session:
 
     def busy(self):
         return bool(self.game.queue)
+
+    @property
+    def guard_allowed(self):
+        """這關能不能開禁區護欄（進階關卡會停用）。"""
+        return self.game.cfg.get("guardrail", True) is not False
+
+    @property
+    def guard_on(self):
+        return self.guardrail and self.guard_allowed
+
+    def quirk_chance(self):
+        if not self.gameplay:
+            return 0.0
+        return quirk_chance(self.game.cfg, self.mood, self.mode)
+
+    def modifiers(self):
+        """本關的難度標籤（畫面上顯示用）：[(圖示, 文字), ...]。"""
+        cfg, g, out = self.game.cfg, self.game, []
+        if not self.gameplay:
+            return out
+        if cfg.get("route_hints", True) is False:
+            out.append(("🧭", "導航壞了：要你指路"))
+        if cfg.get("quirks"):
+            out.append(("🙃", f"恍神率 {self.quirk_chance():.0%}（看心情）"))
+        if cfg.get("max_plan"):
+            out.append(("🧠", f"一次只記得 {cfg['max_plan']} 個動作"))
+        if self.command_limit is not None:
+            out.append(("💬", f"剩 {self.commands_left()} 句"))
+        if g.step_limit:
+            out.append(("⏱️", f"剩 {g.steps_left} 步"))
+        if g.dark:
+            out.append(("🌑", "停電：只看得到附近"))
+        if cfg.get("vision"):
+            out.append(("👓", f"笨笨只看得到 {cfg['vision']} 格內"))
+        if cfg.get("fatigue"):
+            out.append(("😪", f"會累：每句話心情 −{cfg['fatigue']}"))
+        if not self.guard_allowed:
+            out.append(("🛡️", "本關護欄停用"))
+        elif self.guardrail:
+            out.append(("🛡️", "護欄開啟"))
+        if g.forbidden:
+            out.append(("🚫", "禁區：" + "、".join(sorted(g.forbidden))))
+        if g.need_home:
+            out.append(("🏠", "最後要回充電座"))
+        return out
+
+    def _new_entry(self, command, kind, say="", actions=(), flags=()):
+        entry = {"no": self.n_commands, "cmd": command, "kind": kind, "say": say,
+                 "tone": self.last_tone.describe() if (self.last_tone and kind == "command") else "",
+                 "plan": actions_to_text(list(actions)) if actions is not None else "",
+                 "flags": list(flags), "result": [], "done": False}
+        self.history.append(entry)
+        del self.history[:-50]
+        return entry
 
     def _count_command(self):
         """多用一句指令；超過上限就失敗。回傳事件。"""
@@ -145,6 +206,8 @@ class Session:
                 if tone.tags:
                     tone_ev.append(E("tone", f"🗣️ 語氣：{tone.describe()}（心情 {tone.delta:+d}）", tags=tone.tags))
                 tone_ev += self.mood.apply_tone(tone)
+                if self.game.cfg.get("fatigue"):          # 進階關卡：笨笨會累，每句話心情往下掉
+                    tone_ev += self.mood.apply(-self.game.cfg["fatigue"])
                 self.bp.add(tone.bp)
                 events += self._absorb(tone_ev, from_events=False)
             events += self._absorb([E("rule", n) for n in update_rules_from_text(self.game, command)])
@@ -152,6 +215,11 @@ class Session:
                 return {"handled": True, "say": "……", "events": events, "refuse": False}
         if STOP_RE.fullmatch(command):            # 保底動作：「停」直接處理，不等 LLM
             return {"handled": True, "say": "收到！緊急煞車！", "events": events + self.stop(command), "refuse": False}
+        if GO_HOME_RE.fullmatch(command):         # 保底動作：「回充」也直接處理
+            res = {"actions": [{"op": "return_home"}], "say": "好啦，回家充電。", "ok": True, "format_ok": True,
+                   "raws": [], "latency": 0.0}
+            return {"handled": True, "say": res["say"], "events": events + self.apply(command, res, kind="home"),
+                    "refuse": False}
         refuse = (self.gameplay and self.mode == "silly" and not tone.coaxing and not HOME_RE.search(command)
                   and self.mood.should_refuse(self.rng))
         return {"handled": False, "say": "", "events": events, "refuse": refuse}
@@ -160,10 +228,14 @@ class Session:
         with self.lock:
             self.game.queue.clear()
             ev = E("stopped", "收到「停」，動作佇列已清空。")
+            if self.gameplay:
+                self.event_counts["stopped"] += 1
             if self.current:
                 self.current["events"].append(ev)
                 self._finish()
             self.pending_feedback = None
+            entry = self._new_entry(command, "stop", "收到！緊急煞車！", [])
+            entry.update(plan="（緊急煞車）", done=True)
             self._log({"kind": "local_stop", "command": command})
         return [ev]
 
@@ -194,17 +266,39 @@ class Session:
                 self._finish(replaced=True)
             if result.get("emotion"):
                 self.emotion = result["emotion"]
-            if result.get("say") and kind != "local":
+            if result.get("say") and kind not in ("local", "home"):      # 程式自動回的話不算「金句」
                 self.quotes.append({"say": result["say"], "emotion": result.get("emotion"), "command": command,
                                     "refused": bool(result.get("refused")), "kind": kind})
-            extra = []
-            if self.guardrail and kind != "local":
+            extra, flags = [], []
+            llm_actions = result.get("actions", [])
+            if (self.gameplay and kind in ("command", "feedback")
+                    and not result.get("refused") and not result.get("dazed")):
+                acts, ev = limit_plan(llm_actions, self.game.cfg.get("max_plan"))      # 記性差
+                if ev:
+                    extra.append(ev)
+                    flags.append("🧠 忘了後面")
+                acts, ev = maybe_quirk(acts, self.game.cfg, self.rng, self.mood, self.mode)  # 恍神
+                if ev:
+                    extra.append(ev)
+                    flags.append("🙃 " + ev["name"])
+                if acts is not llm_actions:
+                    result = dict(result, actions=acts, llm_actions=llm_actions,
+                                  quirk=ev["quirk"] if ev else None, forgot=any(e["type"] == "forgot" for e in extra))
+            if self.guard_on and kind != "local":
                 safe, note = guard_forbidden(self.game, result["actions"])
                 if note:
                     result = dict(result, actions=safe, guarded=True)
                     extra.append(E("guardrail", note))
+                    flags.append("🛡️ 護欄攔下")
             self.game.set_plan(result["actions"])
-            self.current = {"command": command, "kind": kind, "depth": depth, "result": result, "events": []}
+            if result.get("refused"):
+                flags.append("🙅 拒絕")
+            if result.get("dazed"):
+                flags.append("😵 當機")
+            label = "（回報）" if kind == "feedback" else command
+            entry = self._new_entry(label, kind, result.get("say", ""), result["actions"], flags)
+            self.current = {"command": command, "kind": kind, "depth": depth, "result": result, "events": [],
+                            "entry": entry}
             if result.get("refused"):
                 extra.append(E("refused", "🙅 笨笨拒絕了這個指令！（試試說「請」、稱讚或道歉）"))
             if result.get("dazed"):
@@ -286,7 +380,14 @@ class Session:
             "emotion": r.get("emotion"), "latency_s": round(r.get("latency", 0.0), 3),
             "events": types, "interrupted": interrupted, "replaced": replaced,
             "forbidden_violation": "entered_forbidden" in types,
+            "quirk": r.get("quirk"), "forgot": r.get("forgot", False), "llm_actions": r.get("llm_actions"),
         })
+        entry = cur.get("entry")
+        if entry is not None:
+            shown = [e for e in evs if e["type"] not in QUIET_EVENTS | {"tone", "quirk", "forgot", "guardrail",
+                                                                         "refused", "dazed"}]
+            entry["result"] = [{"type": e["type"], "msg": e["msg"]} for e in shown[:4]]
+            entry["interrupted"], entry["done"] = interrupted, True
         label = cur["command"] if cur["kind"] != "feedback" else f"（修正）{cur['command']}"
         self.agent.memory.remember_turn(label, r.get("actions", []), evs)
         if (not replaced and interrupted and cur["kind"] != "local"

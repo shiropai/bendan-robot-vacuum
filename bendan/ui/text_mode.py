@@ -1,9 +1,12 @@
-"""文字模式（最穩定，任何 Jupyter 都能玩）：input() 讀指令，畫面在同一個位置更新。"""
+"""文字模式（最穩定，任何 Jupyter 都能玩）：input() 讀指令，畫面在同一個位置更新。
+
+畫面用 SVG（不需要 matplotlib）；對話框下方就是「指令紀錄」。想要更像遊戲的介面請用 `play_widgets()`（遊戲視窗）。
+"""
 import time
 from collections import deque
 
 from ..gameplay.progress import Progress
-from ..render import HAS_MPL, hud_html, map_html, render_png
+from ..render import hud_html, render_svg
 from ..session import EXECUTOR, Session
 from .commands import HELP, handle_slash
 
@@ -23,20 +26,17 @@ class NotebookView:
         self.update()
 
     def update(self, say=None, events=(), thinking=False):
-        from IPython.display import HTML, Image
+        from IPython.display import HTML
         if say is not None:
             self.say = say
         self.events.extend(events)
         self.frame += 1
         s = self.session
         with s.lock:
-            if HAS_MPL:
-                pic = Image(data=render_png(s.game, thinking=thinking, frame=self.frame, emotion=s.emotion,
-                                            mood=s.mood.name if s.gameplay and s.mode == "silly" else None))
-            else:
-                pic = HTML(map_html(s.game))
+            pic = render_svg(s.game, view=s.view, thinking=thinking, emotion=s.emotion,
+                             mood=s.mood.name if s.gameplay and s.mode == "silly" else None)
             txt = hud_html(s, self.say, self.events, thinking)
-        self.h_img.update(pic)
+        self.h_img.update(HTML(pic))
         self.h_txt.update(HTML(txt))
 
     def extra(self, html_text):
@@ -82,9 +82,11 @@ def run_turn(session, view, command, tick=0.25):
         _run_until_idle(session, view, tick)
 
 
-def play(level=1, mode="silly", tick=0.25, feedback_rounds=1, unlock_all=False, seed=None, progress=None):
-    """▶️ 文字模式。特殊指令見 /help；q 離開。"""
+def play(level=None, mode="silly", tick=0.25, feedback_rounds=1, unlock_all=False, seed=None, progress=None):
+    """▶️ 文字模式。特殊指令見 /help；q 離開。level=None 會從「還沒破的第一關」開始。"""
     progress = progress or Progress(unlock_all=unlock_all)
+    if level is None:
+        level = progress.next_level()
     if not progress.is_unlocked(level):
         print(f"🔒 第 {level} 關還沒解鎖，先從第 1 關開始（或用 play(level={level}, unlock_all=True)）。")
         level = 1

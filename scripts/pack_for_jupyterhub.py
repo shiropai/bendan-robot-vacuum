@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 INCLUDE = ["bendan", "notebooks", "tests", "scripts", "docs/architecture.md", "docs/gameplay.md",
-           "docs/evaluation_results.md", "README.md", "requirements.txt"]
+           "docs/evaluation_results.md", "docs/voice_input.md", "docs/difficulty.md", "README.md", "requirements.txt"]
 SKIP_PARTS = {"__pycache__", ".ipynb_checkpoints", "archive"}
 
 
@@ -24,6 +24,8 @@ def main():
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for item in INCLUDE:
             p = ROOT / item
+            if not p.exists():
+                continue
             files = [p] if p.is_file() else sorted(f for f in p.rglob("*") if f.is_file())
             for f in files:
                 if SKIP_PARTS & set(f.relative_to(ROOT).parts):

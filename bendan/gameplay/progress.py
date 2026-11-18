@@ -51,6 +51,13 @@ class Progress:
         prev = CAMPAIGN[CAMPAIGN.index(level_id) - 1] if level_id in CAMPAIGN else level_id - 1
         return self.level(prev).get("clears", 0) > 0
 
+    def next_level(self):
+        """還沒通關的第一關（已解鎖）；全破了就回到今日挑戰。"""
+        for lid in CAMPAIGN:
+            if self.is_unlocked(lid) and not self.level(lid).get("clears"):
+                return lid
+        return "daily"
+
     @property
     def totals(self):
         return Counter(self.data["totals"])

@@ -41,7 +41,9 @@ class Agent:
         return persona + "\n\n" + ACTION_SPEC
 
     def build_messages(self, game, command, feedback_events=None, mood=None, refuse=False):
-        world, mem = describe_world(game, hints=self.route_hints), self.memory.to_text(game)
+        hints = self.route_hints and game.cfg.get("route_hints", True)   # 進階關卡：導航壞了，要玩家指路
+        world = describe_world(game, hints=hints, vision=game.cfg.get("vision"))
+        mem = self.memory.to_text(game)
         mood_txt = f"\n\n【你的心情】{mood.prompt_text()}" if (mood is not None and self.mode == "silly") else ""
         if feedback_events is None:
             user = f"【世界狀態】\n{world}\n\n【記憶】\n{mem}{mood_txt}\n\n【主人指令】\n{command}"
