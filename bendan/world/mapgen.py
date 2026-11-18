@@ -119,6 +119,7 @@ def _attempt(rng):
         "battery": 100,
         "par": n_dirt + (2 if need_home else 1),
         "incidents": incidents,
+        "quirks": {"chance": 0.12},
     }
 
 

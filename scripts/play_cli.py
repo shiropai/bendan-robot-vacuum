@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bendan import llm  # noqa: E402
 from bendan.gameplay import Progress  # noqa: E402
-from bendan.render import render_ascii  # noqa: E402
+from bendan.render import facing_text, render_ascii  # noqa: E402
 from bendan.render.hud import event_line  # noqa: E402
 from bendan.session import Session  # noqa: E402
 from bendan.ui.commands import handle_slash  # noqa: E402
@@ -35,10 +35,15 @@ def status(s):
     line = f"[{level_title(g.level_id)}] 灰塵剩 {len(g.dirt)}｜電量 {g.battery_pct:.0f}%｜指令 {s.n_commands}"
     if s.commands_left() is not None:
         line += f"（剩 {s.commands_left()} 句）"
+    if g.step_limit:
+        line += f"｜剩 {g.steps_left} 步"
     if s.gameplay:
         line += (f"｜心情 {s.mood.emoji}{s.mood.name}({s.mood.value:.0f})｜血壓 {s.bp.mmhg}mmHg"
                  f"｜分數 {s.score.score}")
-    return line
+        mods = "  ".join(f"{i}{t}" for i, t in s.modifiers())
+        if mods:
+            line += "\n" + mods
+    return line + "\n🧭 " + facing_text(g)
 
 
 def show_events(events):
@@ -70,7 +75,7 @@ def run(s, command):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--level", default="0")
+    ap.add_argument("--level", default=None, help="預設：還沒破的第一關")
     ap.add_argument("--mode", default="silly", choices=["silly", "serious"])
     ap.add_argument("--model", default=None)
     ap.add_argument("--fake", action="store_true", help="強制使用離線 FakeLLM")
@@ -78,8 +83,8 @@ def main():
     args = ap.parse_args()
 
     llm.connect(model=args.model, use_fake=True if args.fake else None)
-    level = int(args.level) if args.level.isdigit() else args.level
     progress = Progress(unlock_all=args.unlock_all)
+    level = progress.next_level() if args.level is None else (int(args.level) if args.level.isdigit() else args.level)
     if not progress.is_unlocked(level):
         print(f"🔒 {level_title(level)} 還沒解鎖，從第 1 關開始。")
         level = 1

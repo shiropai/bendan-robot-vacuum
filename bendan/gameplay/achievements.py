@@ -33,8 +33,20 @@ ACHIEVEMENTS = [
      "check": lambda s, t: s["events"]["refused"] >= 3},
     {"id": "daily", "icon": "📅", "name": "每日挑戰者", "desc": "通關「今日挑戰」",
      "check": lambda s, t: s["result"]["cleared"] and s["level_id"] == "daily"},
-    {"id": "graduate", "icon": "🏆", "name": "笨笨畢業了", "desc": "通關第 6 關「婆婆十分鐘後到」",
+    {"id": "mother_in_law", "icon": "👵", "name": "婆婆滿意", "desc": "通關第 6 關「婆婆十分鐘後到」",
      "check": lambda s, t: s["result"]["cleared"] and s["level_id"] == 6},
+    {"id": "tamer", "icon": "🦁", "name": "叛逆期馴獸師", "desc": "通關第 7 關「叛逆期」",
+     "check": lambda s, t: s["result"]["cleared"] and s["level_id"] == 7},
+    {"id": "goldfish", "icon": "🐟", "name": "金魚腦訓練師", "desc": "通關第 8 關「記憶體不足」",
+     "check": lambda s, t: s["result"]["cleared"] and s["level_id"] == 8},
+    {"id": "blackout", "icon": "🔦", "name": "摸黑掃地", "desc": "通關第 9 關「颱風夜停電」",
+     "check": lambda s, t: s["result"]["cleared"] and s["level_id"] == 9},
+    {"id": "graduate", "icon": "🏆", "name": "笨笨畢業了", "desc": "通關第 10 關「除夕大掃除」",
+     "check": lambda s, t: s["result"]["cleared"] and s["level_id"] == 10},
+    {"id": "quirk_veteran", "icon": "🙃", "name": "見怪不怪", "desc": "累積遇到 10 次笨笨恍神",
+     "check": lambda s, t: t["quirk"] >= 10},
+    {"id": "clutch_stop", "icon": "✋", "name": "神之煞車", "desc": "同一關按「停」3 次以上，而且通關",
+     "check": lambda s, t: s["result"]["cleared"] and s["events"]["stopped"] >= 3},
 ]
 BY_ID = {a["id"]: a for a in ACHIEVEMENTS}
 

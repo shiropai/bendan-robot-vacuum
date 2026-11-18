@@ -10,6 +10,7 @@
         {"type": "spill", "chance": 0.04, "max": 2},     # 每步 4% 機率：小孩打翻果汁 → 多一坨髒污
         {"type": "dog_poop", "chance": 0.05, "max": 2},  # 狗狗在旁邊留下便便
         {"type": "doorbell", "chance": 0.03, "max": 1},  # 門鈴響 → 笨笨分心，動作被打斷
+        {"type": "leak", "chance": 0.04, "max": 3},      # 颱風天屋頂漏水 → 多一灘水漬
     ]
 """
 import random
@@ -71,6 +72,13 @@ class IncidentDirector:
         game.add_dirt(p)
         msg = self.rng.choice(SPILL_TEXT).format(room=game.room_of(p))
         return [E("spill", msg + f"（多了一坨髒污，現在剩 {len(game.dirt)} 坨）", at=p)]
+
+    def _leak(self, game):
+        p = game.random_free_tile(self.rng, min_dist=2)
+        if p is None:
+            return []
+        game.objects[p] = "puddle"
+        return [E("leak", f"💧 屋頂漏水了！{game.room_of(p)}多了一灘水，小心滑倒。", at=p)]
 
     def _dog_poop(self, game):
         dogs = game.pets("dog")

@@ -7,8 +7,15 @@
 
 **v2 玩法**（靈感：《教妹妹開車》——只能動口、對方不一定照做、語氣太兇會鬧脾氣）：
 💗 笨笨的心情會被你的語氣影響（罵它會頂嘴、罷工）｜🩸 出包會讓主人血壓飆高，爆表就失敗｜🔋 電量｜
-🎲 寵物亂跑、打翻果汁、狗便便、門鈴等突發事件｜⭐ 連擊、三星評價｜🏅 14 個成就｜🔓 關卡解鎖＋每日挑戰地圖。
-詳見 [docs/gameplay.md](docs/gameplay.md)。
+🎲 寵物亂跑、打翻果汁、狗便便、門鈴等突發事件｜⭐ 連擊、三星評價｜🏅 成就｜🔓 關卡解鎖＋每日挑戰地圖。
+
+**v3**（依試玩回饋）：🧗 **教學關＋10 個難度遞增的關卡**——笨笨會**恍神**不照做（左右不分、煞車失靈、忘記吸……機率跟心情連動）、
+記性差、導航壞掉要你指路、停電只看得到附近、步數限制｜🧭 清楚的**方向標示**（黃箭頭、前方 1 2 3 格、左／右、指北針、俯視視角）｜
+🪟 **遊戲視窗**：可以**彈出成獨立視窗**或全螢幕，Enter 送出、Esc 停｜📜 對話框下方的**指令紀錄**｜🎤 [語音輸入評估](docs/voice_input.md)。
+
+詳見 [docs/gameplay.md](docs/gameplay.md)、難度曲線實測 [docs/difficulty.md](docs/difficulty.md)。
+
+![遊戲視窗（彈出成獨立視窗）：第 10 關除夕大掃除](docs/images/game_window_level10.jpg)
 
 ## 專案結構
 
@@ -21,9 +28,9 @@
 │   │   └── fake.py            #     離線 FakeLLM（沒有 API 也能測）
 │   ├── world/                 #   遊戲世界（完全不依賴 LLM）
 │   │   ├── constants.py       #     方向、地圖字元、障礙物、動作白名單
-│   │   ├── levels.py          #     7 個關卡＋評估場景
+│   │   ├── levels.py          #     教學關＋10 個難度遞增的關卡＋評估場景
 │   │   ├── mapgen.py          #     今日挑戰：隨機地圖產生器（BFS 驗證可解）
-│   │   └── game.py            #     引擎：移動、碰撞、電量、障礙物、BFS 回充
+│   │   └── game.py            #     引擎：移動、碰撞、電量、障礙物、BFS 回充、步數上限、停電
 │   ├── agent/                 #   大腦
 │   │   ├── prompts.py         #     動作規格、人設、心情／拒絕指示
 │   │   ├── perception.py      #     以機器人為中心的世界描述
@@ -36,11 +43,12 @@
 │   │   ├── pressure.py        #     主人血壓計
 │   │   ├── scoring.py         #     分數、連擊、星級
 │   │   ├── incidents.py       #     突發事件導演
-│   │   ├── achievements.py    #     成就
+│   │   ├── quirks.py          #     恍神（不照做）與記性差
+│   │   ├── achievements.py    #     成就（20 個）
 │   │   └── progress.py        #     存檔、關卡解鎖
 │   ├── session.py             #   Agent 迴圈＋玩法＋非同步＋事件回饋＋JSONL log
-│   ├── render/                #   等角 2.5D（matplotlib）、HUD（HTML）、ASCII
-│   ├── ui/                    #   文字模式 play()、即時模式 play_widgets()、斜線指令
+│   ├── render/                #   SVG 遊戲畫面（2.5D／俯視＋方向標示）、HUD（HTML）、ASCII、matplotlib PNG
+│   ├── ui/                    #   遊戲視窗 play_widgets()（可彈出）、文字模式 play()、斜線指令
 │   └── evaluation/            #   照做率、格式正確率、記憶遵守率、心情實驗、log 分析
 ├── notebooks/
 │   ├── 01_快速開始_遊玩.ipynb   # 連線 → 玩法說明 → 開始玩
@@ -50,11 +58,15 @@
 ├── tests/                     # pytest（全部離線，不需要 API）
 ├── scripts/
 │   ├── play_cli.py            # 終端機版（純文字地圖）
+│   ├── difficulty_probe.py    # 難度曲線實測（腳本玩家跑每一關）
+│   ├── build_notebooks.py     # 重新產生 notebooks/
 │   └── pack_for_jupyterhub.py # 打包成 zip 上傳 JupyterHub
 ├── docs/
 │   ├── gameplay.md            # 玩法設計文件
 │   ├── architecture.md        # 系統架構
 │   ├── evaluation_results.md  # 課程 JupyterHub × Qwen2.5-7B 實測結果
+│   ├── difficulty.md          # 難度設計與實測
+│   ├── voice_input.md         # 語音輸入可行性評估
 │   └── proposal/              # 期末專題提案
 └── requirements.txt
 ```
@@ -66,8 +78,9 @@
 2. 上傳 zip 到 JupyterHub，在 Terminal 執行
    `python3 -c "import zipfile; zipfile.ZipFile('bendan_jupyterhub.zip').extractall('笨笨掃地機')"`。
 3. 打開 `笨笨掃地機/notebooks/01_快速開始_遊玩.ipynb`，**Kernel 選「Python 3 (ipykernel)」**，由上往下執行。
+4. 第 3 節的遊戲視窗出現後，按右上角「🪟 彈出成獨立視窗」就能在獨立視窗裡玩（被擋的話允許彈出式視窗）。
 
-> ⚠️ 實測：「Python (Lab 1)」Kernel 只有 openai，沒有 matplotlib／pandas／ipywidgets（遊戲會退回 emoji 文字地圖、不能跑評估）；
+> ⚠️ 實測：「Python (Lab 1)」Kernel 只有 openai，沒有 ipywidgets／pandas（只能玩文字模式、不能跑評估）；
 > 「Python 3 (ipykernel)」全部都有，API 設定也讀得到。第一格的 `bendan.check_env()` 會列出缺什麼。
 
 實測結果（Qwen2.5-7B 的照做率、禁區遵守率、心情實驗、遊玩紀錄）見 [docs/evaluation_results.md](docs/evaluation_results.md)。
@@ -76,7 +89,7 @@
 ```bash
 pip install -r requirements.txt
 jupyter lab notebooks/01_快速開始_遊玩.ipynb   # 沒有 API 設定時自動用離線 FakeLLM
-python scripts/play_cli.py --level 0           # 或直接在終端機玩
+python scripts/play_cli.py                     # 或直接在終端機玩（預設從還沒破的第一關開始）
 pytest -q                                      # 跑測試
 ```
 
@@ -84,8 +97,9 @@ pytest -q                                      # 跑測試
 ```python
 from bendan import llm, play, play_widgets
 llm.connect()                  # 連線課程 API（或 FakeLLM）
-play(level=0)                  # 文字模式；/help 看指令
-play_widgets(level=4, unlock_all=True)
+play_widgets()                 # 遊戲視窗（推薦）；從還沒破的第一關開始
+play_widgets(level=9, unlock_all=True, view="top")   # 直接玩停電關、俯視視角
+play()                         # 文字模式；/help 看指令
 ```
 
 請勿將 API Key 提交到 repo。`logs/`、`saves/`、`dist/` 已在 `.gitignore`。

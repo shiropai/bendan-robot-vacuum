@@ -3,8 +3,10 @@
 - `set_plan(actions)`：把驗證過的動作展開成「微步驟」放進佇列（新指令會**取代**還沒做完的舊計畫）。
 - `step()`：執行一個微步驟（走一格／轉一次／吸一次），回傳這一步發生的**事件**。
 - `return_home` 用 BFS 找路，會盡量避開禁區與危險物。
+- 進階關卡：`step_limit`（步數上限 = 時間限制）、`dark`（停電：只看得到笨笨附近、走過的地方才會亮）。
 """
 import copy
+import heapq
 import random
 from collections import deque
 
@@ -56,11 +58,34 @@ class Game:
         self._low_warned = False
         self.cleared = False
         self.failed = None            # 失敗原因（字串）；None = 還沒失敗
+        self.step_limit = cfg.get("step_limit")      # 走超過這麼多步 = 時間到
+        self.dark = cfg.get("dark")                  # 停電關：燈光半徑（格）；None = 全亮
+        self.seen = set()                            # 停電關：看過的格子（畫面只顯示這些）
+        self.reveal()
 
     # ---------- 狀態 ----------
     @property
     def over(self):
         return self.cleared or self.failed is not None
+
+    @property
+    def steps_left(self):
+        return None if not self.step_limit else max(self.step_limit - self.steps, 0)
+
+    def reveal(self):
+        """停電關：把笨笨附近（曼哈頓距離 ≤ dark）的格子加進「看過」。"""
+        if not self.dark:
+            return
+        r = int(self.dark)
+        x0, y0 = self.pos
+        for y in range(y0 - r, y0 + r + 1):
+            for x in range(x0 - r, x0 + r + 1):
+                if abs(x - x0) + abs(y - y0) <= r and self.in_bounds((x, y)):
+                    self.seen.add((x, y))
+
+    def visible(self, p):
+        """畫面上看不看得到這一格（停電關才會有看不到的）。"""
+        return not self.dark or p in self.seen
 
     @property
     def battery_pct(self):
@@ -165,10 +190,13 @@ class Game:
         elif kind == "home":
             events += self._plan_home()
         events += self._battery_check()
+        self.reveal()
         if not self.failed and not self.dirt and (not self.need_home or self.pos == self.home):
             self.cleared = True
             self.queue.clear()
             events.append(E("level_clear", "🎉 過關！"))
+        elif self.step_limit and self.steps >= self.step_limit:
+            events += self.fail("time_up", self.cfg.get("fail_text", "⏱️ 時間到！地板還沒掃完……"))
         return events
 
     # ---------- 微步驟的實作 ----------
@@ -226,14 +254,32 @@ class Game:
             return [E("charged", "🔋 充飽電了！")]
         return []
 
+    @property
+    def low_battery(self):
+        """已經發出低電量警告（充電後會重置）。"""
+        return self._low_warned
+
+    def home_distance(self):
+        path = self.find_path(self.pos, self.home) if self.home else None
+        return len(path) - 1 if path else None
+
     def _battery_check(self):
         if self.battery <= 0:
             self.battery = 0.0
             return [E("out_of_battery", "🪫 電量歸零……笨笨倒在地上不動了。")] + \
                 self.fail("out_of_battery", "電量歸零，這關失敗了。")
-        if not self._low_warned and self.battery_pct < LOW_BATTERY_RATIO * 100:
+        if self._low_warned:
+            return []
+        pct = self.battery_pct
+        if pct < LOW_BATTERY_RATIO * 100:
             self._low_warned = True
-            return [E("low_battery", f"⚠️ 電量剩 {self.battery_pct:.0f}%，快回充電座！")]
+            return [E("low_battery", f"⚠️ 電量剩 {pct:.0f}%，快回充電座！")]
+        if pct < 60:
+            # 實測第 5 關（電池 60）：等到 25% 才警告，離充電座 17 格的角落根本走不回去 → 改成「只夠走回家」就先警告
+            d = self.home_distance()
+            if d is not None and self.battery <= d * BATTERY_COST["move"] + 6:
+                self._low_warned = True
+                return [E("low_battery", f"⚠️ 電量剩 {pct:.0f}%，只夠走回充電座了（離充電座 {d} 格）！")]
         return []
 
     def _suck(self):
@@ -308,6 +354,43 @@ class Game:
         if careful:
             return bfs(cautious) or bfs(lambda n: False)
         return bfs(lambda n: False)
+
+    def find_route(self, start, facing, goal, avoid_hazards=True, turn_cost=2):
+        """「少轉彎」的路線（Dijkstra，狀態＝位置＋朝向；前進成本 1、轉向成本 turn_cost）。
+
+        BFS 的最短路常常走成鋸齒狀，轉成動作清單會超過 12 個（白名單上限）→ 模型照抄就被判無效。
+        這裡讓轉彎比較貴，路線就會盡量走直線、動作比較少。一律不進禁區；找不到回傳 None。
+        """
+        def avoid(n):
+            return self.in_forbidden(n) or (avoid_hazards and self.objects.get(n) in AVOID_OBJECTS)
+
+        start_state = (start, facing)
+        best, prev, tie = {start_state: 0}, {start_state: None}, 0
+        pq = [(0, 0, start, facing)]
+        while pq:
+            d, _, p, f = heapq.heappop(pq)
+            if d > best.get((p, f), float("inf")):
+                continue
+            if p == goal:
+                path, st = [p], (p, f)
+                while prev[st] is not None:
+                    st = prev[st]
+                    if st[0] != path[-1]:
+                        path.append(st[0])
+                return path[::-1]
+            dx, dy = DIRS[f]
+            n = (p[0] + dx, p[1] + dy)
+            moves = [((p, (f + 1) % 4), turn_cost), ((p, (f - 1) % 4), turn_cost)]
+            if not self.is_blocked(n) and (n == goal or not avoid(n)):
+                moves.append(((n, f), 1))
+            for state, c in moves:
+                if d + c < best.get(state, float("inf")):
+                    best[state], prev[state] = d + c, (p, f)
+                    tie += 1
+                    heapq.heappush(pq, (d + c, tie, state[0], state[1]))
+        if avoid_hazards:
+            return self.find_route(start, facing, goal, avoid_hazards=False, turn_cost=turn_cost)
+        return None
 
 
 def run_to_end(game, max_steps=400):

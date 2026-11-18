@@ -127,3 +127,14 @@ def test_over_game_ignores_steps():
     g.fail("time_up", "x")
     g.set_plan([{"op": "forward", "n": 1}])
     assert g.step() == [] and g.pos == g.start[0]
+
+
+def test_low_battery_warns_when_only_enough_to_get_home():
+    """電池小的關卡：還沒到 25%，但電量只夠走回充電座時就要先警告。"""
+    g = Game(5)                          # 電池 60，充電座在 (1,1)
+    g.pos, g.facing = (12, 7), 3         # 右下角，離充電座很遠
+    d = g.home_distance()
+    g.battery = d + 6.1                  # 約 38%，高於 25%（轉一次 −0.2 後就只夠回家）
+    g.set_plan([{"op": "turn_left"}])
+    types = [e["type"] for e in run_to_end(g)]
+    assert "low_battery" in types and g.low_battery and g.battery_pct > 25

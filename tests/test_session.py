@@ -52,7 +52,7 @@ def test_blood_pressure_failure(session_factory):
 
 def test_command_limit_failure(session_factory):
     s = session_factory(6)
-    for _ in range(10):
+    for _ in range(s.command_limit):
         drive(s, "左轉")
     assert not s.game.over and s.commands_left() == 0
     pre = s.preprocess("左轉")
@@ -104,3 +104,16 @@ def test_session_guardrail_and_slash_toggle(session_factory):
     assert any(e["type"] == "guardrail" for e in events) and s.game.violations == 0
     handle_slash(s, "/guard off")
     assert not s.guardrail
+
+
+def test_go_home_sentence_is_handled_locally(session_factory):
+    """整句只是「回充電座」：不問 LLM，直接自動導航回家（跟「停」一樣是保底）。"""
+    s = session_factory(1, "silly")
+    s.game.pos, s.game.facing, s.game.battery = (5, 5), 0, 40
+    pre = s.preprocess("請回充電座")
+    assert pre["handled"] and s.game.queue
+    while s.busy():
+        s.tick()
+    assert s.game.pos == s.game.home and s.game.battery == s.game.battery_max
+    assert s.history[-1]["cmd"] == "請回充電座" and s.history[-1]["kind"] == "home"
+    assert not s.preprocess("先往前走兩格再回充電座")["handled"]     # 有其他動作的句子還是交給 LLM
