@@ -26,7 +26,7 @@ from .audio import decode_wav
 from .textfix import clean_transcript
 
 # 給 Whisper 的提示句：用繁體中文、而且是遊戲常用詞 → 輸出比較會是繁體、也比較會選對同音字
-INITIAL_PROMPT = ("以下是對掃地機器人笨笨下的中文指令：請往前走三格，左轉，右轉，向後轉，然後吸。停！回充電座。"
+INITIAL_PROMPT = ("以下是對掃地機器人笨笨下的中文指令：請往前走一公尺，往前五十公分，左轉，右轉，向後轉，然後吸。停！回充電座。"
                   "不准進臥室、廚房、書房。繞過那隻貓。對不起，你好棒，謝謝。")
 
 

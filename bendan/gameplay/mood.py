@@ -33,6 +33,7 @@ EVENT_MOOD = {
     "cleaned": +3, "charged": +6, "level_clear": +10, "sucked_cat": +1,   # 吸到貓……它其實有點得意
     "damaged": -8, "fell": -6, "banana": -3, "sucked_bad": -4, "quake": -3,              # v8
     "caught_roach": +5, "coin": +4, "cat_ride": +8, "repaired": +8, "toolbox": +3,
+    "dock_repair": +6,                                                                    # v8.1
 }
 
 PROMPTS = {

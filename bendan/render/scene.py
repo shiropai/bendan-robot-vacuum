@@ -50,4 +50,4 @@ def scene_html(game, **kw):
     data = json.dumps(scene_state(game, **kw), ensure_ascii=False).replace("</", "<\\/")
     return (f"<script type='application/json' class='bd-state'>{data}</script>"
             "<div class='bd-3dnote' style='font-size:12px;color:#888;text-align:center'>"
-            "🧊 右上角切換相機：🎥 跟隨（畫面左右＝笨笨的左右）／👀 笨笨視角／🗺️ 俯瞰（可拖曳、滾輪縮放）／📹 監視器</div>")
+            "🧊 右上角的視角按鈕按一下換下一個：🎥 跟隨（畫面左右＝笨笨的左右）→ 👀 笨笨視角 → 🗺️ 俯瞰（可拖曳、滾輪縮放）→ 📹 監視器｜一步 50 公分</div>")

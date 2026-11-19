@@ -3,7 +3,7 @@
     ┌ 🧹 笨笨掃地機  第 3 關……            [🪟 彈出成獨立視窗] [⛶ 全螢幕] ┐
     │ 選關｜賣蠢/正經｜🔊｜↺ 重來｜下一關 ▶｜📋 說明｜結束                 │
     │ ┌──────── 遊戲畫面（3D，Three.js）────────┐ ┌──── 右側面板 ────┐ │
-    │ │ 🎥跟隨／👀笨笨視角／🗺️俯瞰／📹監視器     │ │ 🧭 面向東 ➡       │ │
+    │ │ 〔🎥 跟隨 ▸〕按一下換下一個視角           │ │ 🧭 面向東 ➡       │ │
     │ └─────────────────────────────────────────┘ │ 🔋💗🩸 量表        │ │
     │ 🤖 笨笨：「收到，但撞到不是我的錯」            │ 難度標籤、事件     │ │
     │ [ 跟笨笨說話…    ][送出][🎤][✋ 停！][🔋 回充][💗 哄一下]  └──────────┘ │
@@ -478,7 +478,7 @@ class WidgetGame:
         self.keys = W.HTML("<div class='bd-keys'><kbd>Enter</kbd> 送出　<kbd>Esc</kbd> 停！　<kbd>↑</kbd><kbd>↓</kbd> "
                            "叫出之前的指令　點紀錄裡的指令可以放回輸入框</div>")
         self.extra = W.HTML()
-        self.cmd = W.Text(placeholder="跟笨笨說話，按 Enter 送出（例如：請往前走三格然後吸）", continuous_update=False)
+        self.cmd = W.Text(placeholder="跟笨笨說話，按 Enter 送出（例如：請往前走一公尺然後吸）", continuous_update=False)
         self.btn_send = W.Button(description="送出", button_style="primary", layout=W.Layout(width="64px"))
         self.mic = W.HTML(mic_html(getattr(stt, "label", "") if stt else ""))
         self.audio_in = W.Text(continuous_update=False, layout=W.Layout(display="none"))   # 瀏覽器錄音 → Python
@@ -805,7 +805,7 @@ def play_widgets(level=None, mode="silly", tick=0.5, feedback_rounds=1, unlock_a
     """▶️ 遊戲視窗（推薦）。level=None 會從「還沒破的第一關」開始。
 
     tick：笨笨每移動一格（或轉 90 度）要幾秒；畫面上分成 30 幀播放（0.5 秒 ≈ 60 fps）。
-    view：保留相容用；v8 起遊戲畫面只有 3D（相機在畫面右上角切換：跟隨／笨笨視角／俯瞰／監視器）。
+    view：保留相容用；v8 起遊戲畫面只有 3D（畫面右上角的視角按鈕按一下換下一個：跟隨／笨笨視角／俯瞰／監視器）。
     tts：True＝笨笨的回答用瀏覽器的語音唸出來（畫面上的 🔊 可以隨時關掉）。
     voice："auto"＝有裝 Whisper 就用（按住 🎤 說話）；"off"＝不用 Whisper（🎤 改用瀏覽器語音辨識）；
     也可以直接給 `bendan.voice.connect_stt(...)` 回傳的後端。

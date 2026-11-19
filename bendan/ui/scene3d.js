@@ -34,11 +34,20 @@
   var AC = null, noiseBuf = null, humNode = null;
   function soundOn() { return !!(bot.st && bot.st.tts); }
   function actx() {
-    if (!AC) { var C = window.AudioContext || window.webkitAudioContext; if (!C) return null; AC = new C(); }
+    if (!AC) {
+      var C = window.AudioContext || window.webkitAudioContext; if (!C) return null; AC = new C();
+      var cp = AC.createDynamicsCompressor(); cp.threshold.value = -12; cp.knee.value = 8; cp.ratio.value = 5; cp.connect(AC.destination); AC.__bus = cp;
+    }
     if (AC.state === 'suspended') AC.resume();
     return AC;
   }
   root.addEventListener('pointerdown', actx, true); root.addEventListener('keydown', actx, true);
+  function out(a) { return a.__bus || a.destination; }
+  function rumble(a, dur, vol, delay, cutoff) {      // 低頻轟隆聲（爆炸的餘震）
+    var t = a.currentTime + (delay || 0), n = noise(a), f = a.createBiquadFilter(), g = a.createGain();
+    n.loop = true; f.type = 'lowpass'; f.frequency.setValueAtTime(cutoff || 240, t); f.frequency.exponentialRampToValueAtTime(50, t + dur);
+    env(a, g, t, vol, dur); n.connect(f).connect(g).connect(out(a)); n.start(t); n.stop(t + dur + 0.05);
+  }
   function noise(a) {
     if (!noiseBuf) {
       noiseBuf = a.createBuffer(1, a.sampleRate * 1.5, a.sampleRate);
@@ -53,20 +62,31 @@
   function tone(a, type, f0, f1, dur, vol, delay) {
     var t = a.currentTime + (delay || 0), o = a.createOscillator(), g = a.createGain();
     o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
-    env(a, g, t, vol, dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + 0.05);
+    env(a, g, t, vol, dur); o.connect(g).connect(out(a)); o.start(t); o.stop(t + dur + 0.05);
   }
   function hiss(a, freq, q, dur, vol, delay, sweepTo) {
     var t = a.currentTime + (delay || 0), n = noise(a), f = a.createBiquadFilter(), g = a.createGain();
     f.type = 'bandpass'; f.frequency.setValueAtTime(freq, t); f.Q.value = q || 1;
     if (sweepTo) f.frequency.exponentialRampToValueAtTime(sweepTo, t + dur);
-    env(a, g, t, vol, dur); n.connect(f).connect(g).connect(a.destination); n.start(t); n.stop(t + dur + 0.05);
+    env(a, g, t, vol, dur); n.connect(f).connect(g).connect(out(a)); n.start(t); n.stop(t + dur + 0.05);
   }
   function sfx(kind) {
     if (!soundOn()) return;
     var a = actx(); if (!a || a.state !== 'running') return;
     if (kind === 'bump') { tone(a, 'sine', 140, 45, 0.22, 0.5); hiss(a, 500, 0.7, 0.12, 0.35); }
     else if (kind === 'smoke') { hiss(a, 3500, 0.8, 0.9, 0.18); for (var i = 0; i < 5; i++) hiss(a, 2000 + i * 600, 4, 0.04, 0.25, 0.1 + i * 0.13); }
-    else if (kind === 'boom') { hiss(a, 1200, 0.5, 1.6, 0.9, 0, 70); tone(a, 'sine', 90, 28, 1.2, 0.9); tone(a, 'square', 60, 30, 0.3, 0.2); }
+    else if (kind === 'boom') {                     // 爆炸：爆裂聲＋主爆炸＋胸口那一下＋低頻餘震＋零件掉滿地＋耳鳴
+      hiss(a, 3200, 0.4, 0.2, 1.0); hiss(a, 1200, 0.5, 1.8, 0.95, 0, 70); rumble(a, 3.4, 1.0, 0, 280);
+      tone(a, 'sine', 95, 26, 1.5, 1.0); tone(a, 'sine', 70, 24, 1.1, 0.75, 0.13); tone(a, 'square', 60, 30, 0.3, 0.22);
+      for (var i = 0; i < 16; i++) { var f0 = 700 + Math.random() * 2800; tone(a, i % 2 ? 'triangle' : 'square', f0, f0 * 0.75, 0.04 + Math.random() * 0.08, 0.05 + Math.random() * 0.09, 0.4 + Math.random() * 2.0); }
+      tone(a, 'sine', 3400, 3150, 2.8, 0.03, 0.3);
+    }
+    else if (kind === 'zap') { for (var z = 0; z < 7; z++) hiss(a, 4000 + Math.random() * 3500, 3, 0.04, 0.32, z * 0.06 + Math.random() * 0.03); tone(a, 'sawtooth', 140, 55, 0.3, 0.14); }
+    else if (kind === 'crackle') { for (var c = 0; c < 3; c++) hiss(a, 5000 + Math.random() * 2500, 4, 0.025, 0.12, c * 0.05); }
+    else if (kind === 'sputter') { for (var q = 0; q < 6; q++) tone(a, 'square', 95, 55, 0.07, 0.16, q * 0.13); hiss(a, 900, 0.8, 0.9, 0.25); }
+    else if (kind === 'ignite') { hiss(a, 500, 0.7, 1.0, 0.55, 0, 2600); rumble(a, 1.2, 0.5, 0.05, 400); }
+    else if (kind === 'fire') { for (var r = 0; r < 4; r++) hiss(a, 1800 + Math.random() * 2000, 2, 0.04, 0.07, r * 0.07 + Math.random() * 0.05); }
+    else if (kind === 'alarm') { tone(a, 'square', 1850, 1850, 0.13, 0.12); tone(a, 'square', 1380, 1380, 0.13, 0.12, 0.17); }
     else if (kind === 'fall') { tone(a, 'sine', 900, 160, 0.75, 0.25); [0.8, 1.0, 1.15].forEach(function (d) { tone(a, 'sine', 120, 50, 0.15, 0.45, d); }); }
     else if (kind === 'rescue') { tone(a, 'triangle', 400, 800, 0.18, 0.2); }
     else if (kind === 'repair') { [523, 659, 784, 1047].forEach(function (f, i) { tone(a, 'triangle', f, f, 0.16, 0.22, i * 0.09); }); }
@@ -85,7 +105,7 @@
     if (on && !humNode) {
       var n = noise(a), f = a.createBiquadFilter(), g = a.createGain();
       n.loop = true; f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.6; g.gain.value = 0.0001;
-      n.connect(f).connect(g).connect(a.destination); n.start();
+      n.connect(f).connect(g).connect(out(a)); n.start();
       g.gain.exponentialRampToValueAtTime(0.05, a.currentTime + 0.3);
       humNode = { n: n, g: g };
     } else if (!on && humNode) {
@@ -109,7 +129,12 @@
   var FLOOR_STYLE = { '客廳': 'oak', '書房': 'walnut', '臥室': 'carpet', '廚房': 'tile', '浴室': 'smalltile' };
   var ROOM_PAINT = { '客廳': '#f2e8d7', '臥室': '#e4ddf1', '廚房': '#f4f4ef', '書房': '#dde8d6', '浴室': '#dcecf4' };
   var DIRS4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-  var WALL_H = 2.4, DOOR_H = 1.8, CUT_H = 0.3, R_BOT = 0.385, KS = 0.094;
+  // 真實比例：1 格 = 50 公分，所以 1 公尺 = 2 個場景單位（U）。笨笨直徑約 36 公分（0.73 單位）、牆高 2.4 公尺、門高 2 公尺
+  var U = 2, WALL_H = 2.4 * U, DOOR_H = 2.0 * U, CUT_H = 0.3 * U, R_BOT = 0.385, KS = 0.094;
+  // 家具的真實高度（公尺）：佔的格子只有 50 公分深，模型先等比例塞進格子，再往上拉到真實高度
+  var REAL_H = { sofa: 0.85, tv: 0.5, bookcase: 1.8, armchair: 0.85, plant: 1.1, lamp: 1.6, speaker: 1.0, bed: 0.55, wardrobe: 2.0,
+                 nightstand: 0.55, fridge: 1.8, stove: 0.9, sink: 0.9, counter: 0.9, counter2: 0.9, desk: 0.75, shelf: 1.9,
+                 bookcase2: 1.8, toilet: 0.75, basin: 0.85, washer: 0.85, bathcab: 0.8, cabinet: 0.9 };
   var FAIL_TXT = { exploded: '💥 笨笨爆炸了', owner_faint: '🤯 主人氣昏了', out_of_battery: '🪫 沒電了', time_up: '⏱️ 時間到' };
 
   async function make3d(L, host, assets) {
@@ -123,7 +148,7 @@
     host.appendChild(renderer.domElement);
     var CAMS = [['follow', '🎥 跟隨'], ['eye', '👀 笨笨視角'], ['top', '🗺️ 俯瞰'], ['cctv', '📹 監視器']];
     var bar = document.createElement('div'); bar.className = 'bd-3dbar';
-    bar.innerHTML = CAMS.map(function (c) { return "<button class='bd-btn' data-cam='" + c[0] + "'>" + c[1] + '</button>'; }).join('');
+    bar.innerHTML = "<button class='bd-btn on' data-camnext='1' title='按一下換下一個視角（跟隨 → 笨笨視角 → 俯瞰 → 監視器）'>🎥 跟隨 ▸</button>";
     host.appendChild(bar);
     var over = document.createElement('div'); over.className = 'bd-3dover'; host.appendChild(over);
     var rec = document.createElement('div'); rec.className = 'bd-rec'; host.appendChild(rec);
@@ -326,11 +351,12 @@
       var spec = FURN_MODELS[f[2]] || FURN_MODELS.cabinet, names = spec[0], turn = spec[1] || 0;
       var base = furniture(names[0]); if (!base) return null;
       var sz = base.userData.size, w = turn ? sz.z : sz.x, d = turn ? sz.x : sz.z;
-      var s = Math.min(f[4] * 0.92 / w, 0.86 / d, 1.65 / sz.y, 2.6);
+      var s = Math.min(f[4] * 0.92 / w, 0.86 / d, 2.6);
+      var sy = Math.max(1, Math.min(2.4, (REAL_H[f[2]] || 0.9) * U / (sz.y * s)));     // 拉到真實高度
       var g = new THREE.Group(), inner = new THREE.Group(); g.add(inner);
-      base.scale.setScalar(s); base.rotation.y = turn; inner.add(base);
-      var yy = sz.y * s * 0.98;
-      names.slice(1).forEach(function (n) { var t = furniture(n); if (!t) return; t.scale.setScalar(s * 0.9); t.position.y = yy; t.rotation.y = turn ? 0 : 0; inner.add(t); });
+      base.scale.set(s, s * sy, s); base.rotation.y = turn; inner.add(base);
+      var yy = sz.y * s * sy * 0.98;
+      names.slice(1).forEach(function (n) { var t = furniture(n); if (!t) return; t.scale.setScalar(s * 0.9 * Math.sqrt(sy)); t.position.y = yy; inner.add(t); });
       var back = DIRS4[f[3]], fx = -back[0], fz = -back[1];
       var cx = f[0] + (f[4] === 2 ? f[5] / 2 : 0), cz = f[1] + (f[4] === 2 ? f[6] / 2 : 0);
       var depth = d * s;
@@ -364,11 +390,11 @@
       model.traverse(function (o) { if (o.isSkinnedMesh) { o.skeleton.update(); o.computeBoundingBox(); box.union(tb.copy(o.boundingBox).applyMatrix4(o.matrixWorld)); } });
       if (box.isEmpty()) box.setFromObject(model);
       var size = box.getSize(new THREE.Vector3());
-      var s = (kind === 'cat' ? 0.42 : 0.55) / Math.max(size.y, 0.001);
+      var s = (kind === 'cat' ? 0.3 : 0.48) * U / Math.max(size.y, 0.001);    // 貓約 30 公分高、狗約 48 公分
       model.scale.setScalar(s); model.position.y = -box.min.y * s;
       model.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
       var g = new THREE.Group(); g.add(model);
-      var blob = new THREE.Mesh(new THREE.PlaneGeometry(kind === 'cat' ? 0.55 : 0.75, kind === 'cat' ? 0.75 : 1.0), contactMat);
+      var blob = new THREE.Mesh(new THREE.PlaneGeometry(kind === 'cat' ? 0.7 : 1.0, kind === 'cat' ? 1.0 : 1.4), contactMat);
       blob.rotation.x = -Math.PI / 2; blob.position.y = 0.004; g.add(blob);
       var mixer = new THREE.AnimationMixer(model), acts = {};
       src.animations.forEach(function (c) { acts[c.name.split('|').pop().toLowerCase()] = mixer.clipAction(c); });
@@ -517,6 +543,7 @@
     var face = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.13), new THREE.MeshBasicMaterial({ map: faceTex, toneMapped: false }));
     face.rotation.x = -Math.PI / 2; face.position.set(0, 0.1635, -0.005); body.add(face);
     var faceKey = '';
+    var fireLight = new THREE.PointLight(0xff7a2a, 0, 2.5, 2); fireLight.position.y = 0.35; robot.add(fireLight);   // 第 4 級起火的火光
     function drawFace(key) {
       if (key === faceKey) return; faceKey = key;
       var g = faceCanvas.getContext('2d'), W = 128, H = 64, col = key === 'hurt' || key === 'dead' ? '#ff6b6b' : '#5ef2ff';
@@ -645,7 +672,7 @@
           var cx = x + d[0] / 2, cz = y + d[1] / 2, room = tile[nk];
           if (room === undefined) { vquad(ext, cx, cz, d[0], d[1], 0, WALL_H); return; }
           vquad(face(room), cx, cz, d[0], d[1], 0, WALL_H);
-          if (room === '書房') vquad(wain, cx + d[0] * 0.012, cz + d[1] * 0.012, d[0], d[1], 0, 0.75);
+          if (room === '書房') vquad(wain, cx + d[0] * 0.012, cz + d[1] * 0.012, d[0], d[1], 0, 0.8 * U);
           // 牆角的陰影（假 AO）：沿著牆在地板上畫一條漸層
           var ax = x + d[0] * 0.5 + d[0] * 0.22, az = y + d[1] * 0.5 + d[1] * 0.22, tx = d[1], tz = -d[0];
           var p0 = [ax - tx / 2 - d[0] * 0.22, 0.004, az - tz / 2 - d[1] * 0.22], p1 = [ax + tx / 2 - d[0] * 0.22, 0.004, az + tz / 2 - d[1] * 0.22];
@@ -700,7 +727,7 @@
           if (!straight || furnFace[x + ',' + y + ',' + i]) return;
           var fx = x + d[0] * 0.5, fz = y + d[1] * 0.5, rot = Math.atan2(d[0], d[1]);
           if (outside && (x * 7 + y * 3) % 5 === 0) { decor.add(windowAt(fx, fz, rot, room === '浴室')); return; }
-          if (r() < 0.14) decor.add(artAt(fx, fz, rot, Math.floor(r() * 4), 1.35 + r() * 0.25));
+          if (r() < 0.14) decor.add(artAt(fx, fz, rot, Math.floor(r() * 4), (1.4 + r() * 0.25) * U));
         });
       });
       // 天花板（從下面看得到、從上面看是透明的）＋吸頂燈＋客廳吊扇
@@ -794,19 +821,19 @@
       parent.add(f); fogBoxes[x + ',' + y] = f;
     }
     function windowAt(x, z, rot, small) {
-      var g = new THREE.Group(), w = small ? 0.5 : 0.82, h = small ? 0.45 : 1.0, y0 = small ? 1.4 : 0.85;
+      var g = new THREE.Group(), w = small ? 0.7 : 0.9, h = (small ? 0.45 : 1.1) * U, y0 = (small ? 1.5 : 0.9) * U;
       var glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), glassMat); glass.position.set(0, y0 + h / 2, 0.006); g.add(glass);
       [[w + 0.08, 0.05, 0, y0 - 0.0], [w + 0.08, 0.05, 0, y0 + h], [0.05, h, -w / 2 - 0.0, y0 + h / 2], [0.05, h, w / 2, y0 + h / 2], [0.03, h, 0, y0 + h / 2]].forEach(function (b) {
         var m = new THREE.Mesh(new THREE.BoxGeometry(b[0], b[1], 0.04), trimMat); m.position.set(b[2], b[3], 0.02); g.add(m);
       });
       var sill = new THREE.Mesh(new THREE.BoxGeometry(w + 0.16, 0.03, 0.1), trimMat); sill.position.set(0, y0 - 0.03, 0.05); g.add(sill);
       if (!small) [-1, 1].forEach(function (s) {
-        var c = new THREE.Mesh(new THREE.PlaneGeometry(0.2, h + 0.35), curtainMat); c.position.set(s * (w / 2 + 0.12), y0 + h / 2 - 0.05, 0.05); g.add(c);
+        var c = new THREE.Mesh(new THREE.PlaneGeometry(0.2, h + 0.3 * U), curtainMat); c.position.set(s * (w / 2 + 0.12), y0 + h / 2 - 0.05, 0.05); g.add(c);
       });
       g.position.set(x, 0, z); g.rotation.y = rot; return g;
     }
     function artAt(x, z, rot, k, y) {
-      var g = new THREE.Group(), w = 0.36 + (k % 2) * 0.12, h = 0.46;
+      var g = new THREE.Group(), w = 0.6 + (k % 2) * 0.2, h = 0.8;
       var fr = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, h + 0.05, 0.03), woodTrim); fr.position.set(0, y, 0.015); g.add(fr);
       var pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), ARTS[k]); pic.position.set(0, y, 0.032); g.add(pic);
       g.position.set(x, 0, z); g.rotation.y = rot; return g;
@@ -825,7 +852,7 @@
         g.add(f); fans.push(f); disc.position.y = WALL_H - 0.04;
       }
       if (withLight) {
-        var L1 = new THREE.PointLight(0xffe2b8, 7, 12, 1.6); L1.position.y = WALL_H - 0.35; g.add(L1); g.userData.light = L1;
+        var L1 = new THREE.PointLight(0xffe2b8, 12, 20, 1.6); L1.position.y = WALL_H - 0.35; g.add(L1); g.userData.light = L1;
       }
       g.position.set(x, 0, z); return g;
     }
@@ -956,10 +983,13 @@
     function playFx(f) {
       var kind = f[1], x = f[2], y = f[3], dir = f[4], extra = f[5] || {};
       if (kind === 'bump') bump.pending = { x: x, y: y, f: dir };
-      else if (kind === 'smoke') later(bump.pending ? 0.25 : 0, function () {
-        var p = robot.position.clone().add(V(0, 0.25, 0));
-        for (var i = 0; i < 10; i++) smokePuff(p, false, false);
-        sparks(p, 14); flash(p, 0xffaa55, 6, 0.25); sfx('smoke');
+      else if (kind === 'smoke') later(bump.pending ? 0.25 : 0, function () {   // 受損升一級（1 冒煙 … 5 過熱警報）
+        var lv = extra.stage || 1, p = robot.position.clone().add(V(0, 0.25, 0));
+        for (var i = 0; i < 6 + lv * 3; i++) smokePuff(p, lv >= 3, lv >= 3);
+        sparks(p, 8 + lv * 6, lv >= 4 ? '#ff9a3c' : '#ffd27a', 1.4 + lv * 0.2);
+        flash(p, lv >= 5 ? 0xff2a2a : lv >= 4 ? 0xff7a1a : 0xffaa55, 4 + lv * 3, 0.3);
+        sfx(['smoke', 'smoke', 'zap', 'sputter', 'ignite', 'alarm'][lv] || 'smoke');
+        if (lv >= 2) shakeCam(0.03 + lv * 0.015, 0.4);
       });
       else if (kind === 'boom') {
         var delay = override ? 1.0 : bump.pending ? 0.3 : 0;
@@ -1083,25 +1113,30 @@
     }
 
     // 相機操作
-    host.addEventListener('click', function (e) { var b = e.target.closest('[data-cam]'); if (b) setCam(b.getAttribute('data-cam')); });
+    host.addEventListener('click', function (e) {
+      if (!e.target.closest('[data-camnext]')) return;
+      var i = 0; CAMS.forEach(function (c, k) { if (c[0] === cam) i = k; });
+      setCam(CAMS[(i + 1) % CAMS.length][0]);
+    });
     function setCam(c) {
       cam = c;
-      bar.querySelectorAll('[data-cam]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-cam') === c); });
+      var btn = bar.querySelector('[data-camnext]');
+      CAMS.forEach(function (k) { if (k[0] === c) btn.textContent = k[1] + ' ▸'; });
       host.classList.toggle('bd-cctv', c === 'cctv');
-      hint.textContent = { follow: '相機跟在笨笨背後：畫面的左右＝笨笨的左右', eye: '笨笨的眼睛看出去', top: '俯瞰：拖曳轉視角、滾輪縮放（牆會自動降低）', cctv: '房間角落的監視器' }[c];
+      hint.textContent = { follow: '相機跟在笨笨背後：畫面的左右＝笨笨的左右', eye: '笨笨的眼睛看出去', top: '俯瞰：在畫面上拖曳轉視角、滾輪縮放（牆會自動降低）', cctv: '房間角落的監視器' }[c];
     }
     setCam('follow');
     var drag = null, cvs = renderer.domElement;
     cvs.addEventListener('pointerdown', function (e) { drag = e.clientX; });
     cvs.addEventListener('pointermove', function (e) {
-      if (drag === null || Math.abs(e.clientX - drag) < 3) return;
-      if (cam !== 'top') setCam('top'); yaw -= (e.clientX - drag) * 0.01; drag = e.clientX;
+      if (cam !== 'top' || drag === null || Math.abs(e.clientX - drag) < 3) return;   // 只有俯瞰時才能拖曳；點畫面不會換視角
+      yaw -= (e.clientX - drag) * 0.01; drag = e.clientX;
     });
     cvs.addEventListener('pointerup', function () { drag = null; });
     cvs.addEventListener('pointerleave', function () { drag = null; });
-    cvs.addEventListener('wheel', function (e) { e.preventDefault(); if (cam !== 'top') setCam('top'); dist = Math.max(4, Math.min(40, dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+    cvs.addEventListener('wheel', function (e) { if (cam !== 'top') return; e.preventDefault(); dist = Math.max(4, Math.min(40, dist * (1 + e.deltaY * 0.001))); }, { passive: false });
 
-    var clock = new THREE.Clock(), fwd = new THREE.Vector3(), tmp = new THREE.Vector3(), pivot = new THREE.Vector3(), lastSmoke = 0, lastSpark = 0;
+    var clock = new THREE.Clock(), fwd = new THREE.Vector3(), tmp = new THREE.Vector3(), pivot = new THREE.Vector3(), lastSmoke = 0, lastSpark = 0, lastFlame = 0, lastCrack = 0, lastAlarm = 0;
     function ease(k) { return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; }
     function loop() {
       var win = cvs.ownerDocument.defaultView || window;     // 彈出視窗後要用新視窗的 rAF
@@ -1133,14 +1168,31 @@
         if (!override) body.position.y = busy ? Math.sin(T * 30) * 0.003 : 0;
         brushes.forEach(function (b, i) { b.rotation.y += (i ? -1 : 1) * dt * (vac ? 40 : busy ? 22 : 3); });
         lidar.rotation.y += dt * (busy ? 9 : 2);
-        ringMat.emissiveIntensity = thinking ? 1 + Math.sin(T * 6) * 0.9 : dmg ? (Math.random() < 0.08 ? 0.1 : 1.6) : 1.6;
+        ringMat.emissiveIntensity = thinking ? 1 + Math.sin(T * 6) * 0.9 : dmg ? (Math.random() < 0.03 * dmg ? 0.05 : 1.6) : 1.6;
       }
       hum(vac && busy && !wrecked);
-      // 冒煙（受損）／殘骸一直冒黑煙
-      if ((dmg >= 1 || wrecked) && robot.visible !== false && now - lastSmoke > (wrecked ? 70 : 110)) {
-        lastSmoke = now; smokePuff(wrecked ? robot.position.clone().add(V(0, 0.1, 0)) : robot.position.clone().add(V(0.05, 0.2, 0.08)), wrecked, wrecked);
+      // 受損 5 級：1 冒煙 → 2 噴火花 → 3 濃煙＋燈號亂閃 → 4 起火 → 5 過熱紅光＋警報＋抖動；殘骸一直冒黑煙
+      if ((dmg >= 1 || wrecked) && robot.visible !== false && now - lastSmoke > (wrecked ? 70 : dmg >= 3 ? 75 : dmg >= 2 ? 150 : 220)) {
+        lastSmoke = now;
+        smokePuff(wrecked ? robot.position.clone().add(V(0, 0.1, 0)) : robot.position.clone().add(V(0.05, 0.2, 0.08)), wrecked || dmg >= 3, wrecked || dmg >= 4);
       }
-      if (dmg >= 1 && !wrecked && now - lastSpark > 900 + Math.random() * 900) { lastSpark = now; sparks(robot.position.clone().add(V(0, 0.18, 0)), 5); }
+      if (!wrecked && dmg >= 2 && now - lastSpark > (dmg >= 3 ? 450 : 900) + Math.random() * 700) {
+        lastSpark = now; sparks(robot.position.clone().add(V(rr(0.15), 0.18, rr(0.15))), 4 + dmg * 2, '#ffe08a', 1.4); if (dmg <= 3) sfx('crackle');
+      }
+      if (!wrecked && dmg >= 4 && robot.visible !== false) {
+        if (now - lastFlame > 45) {
+          lastFlame = now;
+          emit({ pos: robot.position.clone().add(V(rr(0.12), 0.17, rr(0.12))), vel: V(rr(0.06), 0.55 + Math.random() * 0.4, rr(0.06)),
+                 color: Math.random() < 0.5 ? '#ffb347' : '#ff5a1f', size0: 0.13, size1: 0.02, life: 0.55, alpha: 0.9, add: true, grav: -0.3 });
+        }
+        fireLight.intensity = 1.6 + Math.random() * 1.4;
+        if (now - lastCrack > 700 + Math.random() * 900) { lastCrack = now; sfx('fire'); }
+      } else fireLight.intensity = 0;
+      if (!wrecked && dmg >= 5) {
+        var pulse = 0.5 + 0.5 * Math.sin(T * 9);
+        shellMat.emissive.setRGB(0.55 * pulse, 0.02, 0); body.rotation.z = Math.sin(T * 40) * 0.02; body.rotation.x = Math.cos(T * 37) * 0.015;
+        if (now - lastAlarm > 900) { lastAlarm = now; sfx('alarm'); }
+      } else if (!wrecked) { shellMat.emissive.setRGB(0, 0, 0); body.rotation.z = 0; body.rotation.x = 0; }
       // 粒子
       for (var j = parts.length - 1; j >= 0; j--) {
         var s = parts[j], u = s.userData; u.life += dt; var k2 = u.life / u.max;

@@ -22,7 +22,9 @@ BLOCKING_OBJECTS = {"cat", "dog"}                       # 走不過去
 HAZARD_OBJECTS = {"lego", "cable", "poop", "puddle", "hole", "banana"}    # 走得過去，但會出事
 AVOID_OBJECTS = HAZARD_OBJECTS | {"sock"}               # 自動導航時盡量避開
 SUCK_BAD = {"sock", "puddle", "lego", "cable", "poop"}  # v8：吸到會受損
-MAX_DAMAGE = 2       # v8：受損兩次＝爆炸（第一次冒煙）
+MAX_DAMAGE = 6       # 受損 5 級，第 6 次＝爆炸
+DAMAGE_STAGES = {1: ("💨", "開始冒煙了"), 2: ("⚡", "開始噴火花了"), 3: ("🌫️", "冒出濃煙、燈號亂閃"),
+                 4: ("🔥", "起火了"), 5: ("🚨", "過熱了，紅燈警報狂響")}
 
 ACTION_WHITELIST = {"forward", "drive", "turn_left", "turn_right", "stop", "suck", "vacuum_on", "vacuum_off",
                     "return_home"}

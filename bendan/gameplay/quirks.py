@@ -57,14 +57,14 @@ def apply_quirk(kind, actions, rng):
             return None, None
         i, k = rng.choice(idx), rng.choice([1, 1, 2])
         acts[i]["n"] = min(acts[i]["n"] + k, MAX_FORWARD)
-        return acts, f"🛞 煞車失靈，多衝了 {k} 格！"
+        return acts, f"🛞 煞車失靈，多衝了 {k * 50} 公分！"
     if kind == "undershoot":
         idx = _forward_idx(acts, min_n=2)
         if not idx:
             return None, None
         i = rng.choice(idx)
         acts[i]["n"] -= 1
-        return acts, "🦥 笨笨偷懶，少走了一格。"
+        return acts, "🦥 笨笨偷懶，少走了 50 公分。"
     if kind == "forget_suck":
         if not any(a["op"] in ("suck", "vacuum_on") for a in acts):
             return None, None

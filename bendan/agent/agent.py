@@ -7,6 +7,7 @@ import time
 from contextlib import nullcontext
 
 from .. import llm
+from .flavor import level_flavor, pick_flavor
 from .memory import Memory, events_to_text
 from .parsing import parse_reply
 from .perception import describe_world
@@ -21,10 +22,12 @@ DAZE_ACTIONS = [
 
 
 class Agent:
-    def __init__(self, mode="silly", silliness=None, seed=None, route_hints=False):
+    def __init__(self, mode="silly", silliness=None, seed=None, route_hints=False, flavor=False):
         self.mode = mode              # "silly"＝賣蠢模式；"serious"＝正經模式（對照組）
         self.silliness = silliness    # None＝依關卡設定（再被心情修正）
         self.route_hints = route_hints  # True＝世界描述附上「去最近灰塵」的路線（遊戲中開啟，評估預設關閉）
+        self.flavor = flavor          # True＝每句從提示詞池抽「今天的笨笨」（遊戲中開啟；評估、正經模式關閉）
+        self.last_flavor = None
         self.memory = Memory()
         self.rng = random.Random(seed)
 
@@ -45,6 +48,10 @@ class Agent:
         world = describe_world(game, hints=hints, vision=game.cfg.get("vision"))
         mem = self.memory.to_text(game)
         mood_txt = f"\n\n【你的心情】{mood.prompt_text()}" if (mood is not None and self.mode == "silly") else ""
+        self.last_flavor = None
+        if self.flavor and self.mode == "silly":
+            ftxt, self.last_flavor = pick_flavor(game, self.rng, mood)
+            mood_txt += f"\n\n【今天的笨笨】\n{ftxt}"
         if feedback_events is None:
             user = f"【世界狀態】\n{world}\n\n【記憶】\n{mem}{mood_txt}\n\n【主人指令】\n{command}"
             if refuse:
@@ -57,10 +64,11 @@ class Agent:
     def think(self, game, command, feedback_events=None, lock=None, mood=None, refuse=False):
         with (lock or nullcontext()):          # 讀取世界狀態時上鎖（背景執行緒安全）
             messages = self.build_messages(game, command, feedback_events, mood, refuse)
-        temperature = 0.2 if self.mode == "serious" else 0.8
+        temperature = 0.2 if self.mode == "serious" else (level_flavor(game)["temperature"] if self.flavor else 0.8)
         result = {"command": command, "mode": self.mode, "raws": [], "errors": [],
                   "format_ok": False, "retried": False, "ok": False, "dazed": False,
-                  "actions": [], "say": "", "emotion": None, "refused": False}
+                  "actions": [], "say": "", "emotion": None, "refused": False, "flavor": self.last_flavor,
+                  "temperature": temperature}
         t0 = time.perf_counter()
         for attempt in range(2):                # 解析失敗自動重試一次
             try:
@@ -79,7 +87,7 @@ class Agent:
                 messages = messages + [
                     {"role": "assistant", "content": raw},
                     {"role": "user", "content": "你的回覆不符合格式：" + "；".join(errs[:3])
-                     + '。請只輸出一個 JSON 物件，例如 {"actions": [{"op": "forward", "n": 1}], "say": "好"}'},
+                     + '。請只輸出一個 JSON 物件，例如 {"actions": [{"op": "forward", "cm": 50}], "say": "好"}'},
                 ]
         result["latency"] = time.perf_counter() - t0
         if not result["ok"]:                    # 兩次都失敗 → 發呆演出，把模型原話秀出來

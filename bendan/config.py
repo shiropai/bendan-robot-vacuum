@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOG_DIR = Path(os.getenv("BENDAN_LOG_DIR", PROJECT_ROOT / "logs"))
 SAVE_DIR = Path(os.getenv("BENDAN_SAVE_DIR", PROJECT_ROOT / "saves"))
 
-DEFAULT_MODEL = "qwen2.5:7b"   # 提案預設；也可以試 qwen2.5:3b、llama3.1:8b
+DEFAULT_MODEL = "qwen2.5:7b"   # 提案預設；課程伺服器也有 llama3.1:8b、qwen3-14b
 
 
 def ensure_dirs():

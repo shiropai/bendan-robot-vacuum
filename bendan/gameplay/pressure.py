@@ -13,6 +13,8 @@ EVENT_BP = {
     "damaged": 10, "exploded": 25, "fell": 10, "banana": 4, "sucked_bad": 6, "quake": 6, "roach": 8,
     "banana_drop": 1, "caught_roach": -15, "popcorn": 3, "coin": -2, "cat_ride": -4, "repaired": -6, "toolbox": -2,
     "cleaned": -4, "charged": -2, "level_clear": -20,
+    # v8.1
+    "dock_repair": -6,
 }
 
 LABELS = [(85, "快爆血管 🤯"), (60, "青筋浮現 😡"), (30, "有點火 😤"), (0, "冷靜 😌")]

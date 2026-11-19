@@ -7,7 +7,9 @@
 - v6 連續移動：`drive`＝一直往前開，直到「停」、撞到東西或被事件打斷（佇列裡的 ("drive",) 不會被消耗）；
   `vacuum_on/off`＝吸塵模式，開著的時候走過的格子會順便吸（每格多耗一點電，吸到襪子、水漬一樣出事）。
 - v8 受損：撞到牆／家具／寵物、吸到不該吸的（襪子、水、樂高、電線、便便）、掉進地洞 → `damage` +1；
-  第一次冒煙，第二次爆炸（這關失敗）。撿到維修包可以修好一次。家具（地圖 'F'）跟牆一樣擋路，但有名字。
+  受損分 5 級（冒煙 → 噴火花 → 濃煙＋燈號亂閃 → 起火 → 過熱紅燈警報），第 6 次就爆炸（這關失敗）。
+  撿到維修包、或回到充電座，可以修好一級。`explode: False` 的關卡（新手關 0–2）最多到第 5 級、不會爆炸。
+  家具（地圖 'F'）跟牆一樣擋路，但有名字。
 - v8 畫面特效：`fx` 記錄最近發生的「要播動畫的事」（撞擊、冒煙、爆炸、掉洞……），3D 畫面看編號播一次。
 """
 import copy
@@ -16,9 +18,10 @@ import itertools
 import random
 from collections import deque
 
-from .constants import (AVOID_OBJECTS, BATTERY_COST, BLOCKING_OBJECTS, DIRS, LOW_BATTERY_RATIO, MAX_DAMAGE,
+from .constants import (AVOID_OBJECTS, BATTERY_COST, BLOCKING_OBJECTS, DAMAGE_STAGES, DIRS, LOW_BATTERY_RATIO, MAX_DAMAGE,
                         OBJECT_CHARS, OBJECT_NAMES, START_FACING, SUCK_BAD, E)
 from .levels import get_level
+from .units import cells_from_cm, fmt_len
 
 _GAME_IDS = itertools.count(1)
 
@@ -77,7 +80,8 @@ class Game:
         self.dark = cfg.get("dark")                  # 停電關：燈光半徑（格）；None = 全亮
         self.seen = set()                            # 停電關：看過的格子（畫面只顯示這些）
         self.fragile = cfg.get("fragile", True)      # v8：會不會受損（評估場景關掉）
-        self.damage = 0                              # 0 正常、1 冒煙、2 爆炸
+        self.can_explode = cfg.get("explode", True)  # False＝新手關，最多壞到第 5 級、不會爆炸
+        self.damage = 0                              # 0 正常、1–5 受損等級（見 DAMAGE_STAGES）、6 爆炸
         self.rider = None                            # v8：背上載著的貓 {"left": 還要載幾步}
         self.fx, self.fx_n = [], 0                   # v8：畫面特效（[編號, 種類, x, y, 朝向, 附加]）
         self.reveal()
@@ -182,8 +186,8 @@ class Game:
         self.queue.clear()
         for a in actions:
             op = a["op"]
-            if op == "forward":
-                self.queue.extend([("move",)] * a["n"])
+            if op == "forward":      # 引擎用格數 n；給 LLM 看的是公分 cm（一格 50 公分）
+                self.queue.extend([("move",)] * (a["n"] if "n" in a else cells_from_cm(a["cm"]) or 0))
             elif op == "drive":
                 self.queue.append(("drive",))
             elif op in ("vacuum_on", "vacuum_off"):
@@ -278,18 +282,25 @@ class Game:
         del self.fx[:-10]
 
     def _hurt(self, cause):
-        """受損一次：第一次冒煙，第二次爆炸（這關失敗）。"""
+        """受損一級：1 冒煙 → 2 噴火花 → 3 濃煙＋燈號亂閃 → 4 起火 → 5 過熱警報 → 第 6 次爆炸（這關失敗）。"""
         if not self.fragile or self.over:
             return []
-        self.damage = min(self.damage + 1, MAX_DAMAGE)
         self.queue.clear()
+        if not self.can_explode and self.damage + 1 >= MAX_DAMAGE:      # 新手關：停在最後一級，不會炸
+            self.damage = MAX_DAMAGE - 1
+            self._fx("smoke", cause=cause, stage=self.damage)
+            return [E("damaged", f"🔥 {cause}，笨笨已經壞到最嚴重了……（新手關不會爆炸；第 3 關開始就會囉！回充電座可以修一級）",
+                      cause=cause, stage=self.damage)]
+        self.damage = min(self.damage + 1, MAX_DAMAGE)
         if self.damage >= MAX_DAMAGE:
             self.vacuum = False
             self._fx("boom", cause=cause)
             return ([E("exploded", f"💥 轟！{cause}，笨笨整台炸開了……", cause=cause)]
                     + self.fail("exploded", "💥 笨笨爆炸了，這關失敗。"))
-        self._fx("smoke", cause=cause)
-        return [E("damaged", f"💨 {cause}，笨笨開始冒煙了！再出一次事就會爆炸！", cause=cause)]
+        self._fx("smoke", cause=cause, stage=self.damage)
+        icon, what = DAMAGE_STAGES[self.damage]
+        left = "（新手關不會爆炸）" if not self.can_explode else f"（受損 {self.damage}/{MAX_DAMAGE - 1}，再出事 {MAX_DAMAGE - self.damage} 次就爆炸）"
+        return [E("damaged", f"{icon} {cause}，笨笨{what}！{left}回充電座可以修一級。", cause=cause, stage=self.damage)]
 
     def repair(self):
         if self.damage <= 0:
@@ -382,11 +393,11 @@ class Game:
                 events.append(E("slip", f"踩到水漬腳底一滑，差點撞上{self.what_at(slide)}！"))
             else:
                 self.pos = slide
-                events.append(E("slip", "踩到水漬，滑了一格！"))
+                events.append(E("slip", "踩到水漬，滑了 50 公分！"))
                 events += self._enter(slide, p, depth + 1)
         if p == self.home:
             events.append(E("docked", "回到充電座了。"))
-            events += self._charge()
+            events += self._charge() + self._dock_repair()
         return events
 
     def _fall(self, p, prev):
@@ -416,6 +427,12 @@ class Game:
             return [E("charged", "🔋 充飽電了！")]
         return []
 
+    def _dock_repair(self):
+        """v8.1：回到充電座順便保養 → 修好一次損傷（冒煙的笨笨有地方可以回去，不用硬撐到爆炸）。"""
+        if self.repair():
+            return [E("dock_repair", f"🔧 充電座幫笨笨做了保養：修好一級（受損 {self.damage}/{MAX_DAMAGE - 1}）。")]
+        return []
+
     @property
     def low_battery(self):
         """已經發出低電量警告（充電後會重置）。"""
@@ -441,7 +458,7 @@ class Game:
             d = self.home_distance()
             if d is not None and self.battery <= d * BATTERY_COST["move"] + 6:
                 self._low_warned = True
-                return [E("low_battery", f"⚠️ 電量剩 {pct:.0f}%，只夠走回充電座了（離充電座 {d} 格）！")]
+                return [E("low_battery", f"⚠️ 電量剩 {pct:.0f}%，只夠走回充電座了（離充電座 {fmt_len(d)}）！")]
         return []
 
     def _suck(self):
@@ -496,14 +513,14 @@ class Game:
             self.queue.clear()
             self.facing = (self.facing + 2) % 4
             return [E("sucked_dog", "吸到狗耳朵！狗狗狂吠，笨笨嚇得轉身就跑。")]
-        return [E("suck_empty", "這格本來就很乾淨，空吸了一下。")]
+        return [E("suck_empty", "這裡本來就很乾淨，空吸了一下。")]
 
     def _plan_home(self):
         path = self.find_path(self.pos, self.home)
         if path is None:
             return [E("no_path", "找不到回充電座的路……")]
         if len(path) == 1:
-            return [E("docked", "已經在充電座上了。")] + self._charge()
+            return [E("docked", "已經在充電座上了。")] + self._charge() + self._dock_repair()
         micro, f = [], self.facing
         for a, b in zip(path, path[1:]):
             d = DIRS.index((b[0] - a[0], b[1] - a[1]))
@@ -511,7 +528,7 @@ class Game:
             micro.append(("move",))
             f = d
         self.queue.extendleft(reversed(micro))
-        return [E("navigating", f"自動導航回充電座（{len(path) - 1} 格）。")]
+        return [E("navigating", f"自動導航回充電座（{fmt_len(len(path) - 1)}）。")]
 
     def find_path(self, start, goal, careful=True):
         """BFS：先試著避開禁區與危險物，找不到再放寬。"""

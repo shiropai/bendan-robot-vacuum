@@ -3,7 +3,7 @@
 
 兩種腳本玩家（語氣都很溫和、都有「請」，只看難度機制本身的影響）：
 - lazy（偷懶玩家）：一直說「請去吸最近的灰塵」，完全靠 AI 自己找路。v2 這樣就能輕鬆過關 → 「AI 太聰明」。
-- precise（精準玩家）：看整張地圖算好最短路線，講「請往前走3格，右轉，往前走2格，吸」這種精確指令，
+- precise（精準玩家）：看整張地圖算好最短路線，講「請往前走1.5公尺，右轉，往前走1公尺，吸」這種精確指令，
   並照關卡「一次記得幾個動作」拆句。
 兩種玩家都會在灰塵清完、或出現低電量警告時說「請回充電座」。
   （停電關它也看得到整張地圖 → 是「理想玩家」的上限，真人只會更難。）
@@ -28,12 +28,13 @@ from bendan.agent.perception import path_to_actions  # noqa: E402
 from bendan.gameplay import Progress  # noqa: E402
 from bendan.session import JsonlLogger, Session  # noqa: E402
 from bendan.world import CAMPAIGN, level_title  # noqa: E402
+from bendan.world.units import fmt_len  # noqa: E402
 
 OP_TEXT = {"turn_left": "左轉", "turn_right": "右轉", "suck": "吸"}
 
 
 def op_text(a):
-    return f"往前走{a['n']}格" if a["op"] == "forward" else OP_TEXT[a["op"]]
+    return f"往前走{fmt_len(a['n']).replace(' ', '')}" if a["op"] == "forward" else OP_TEXT[a["op"]]
 
 
 def lazy_command(s):

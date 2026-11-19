@@ -33,22 +33,27 @@ def test_scaled_levels_have_furniture_and_stay_solvable(level_id):
 def test_perception_names_furniture():
     from bendan.agent.perception import scan
     g = Game(5)
+    g.forbidden = set()
     p, f = next(iter(g.furniture.items()))
     dx, dy = [(0, -1), (1, 0), (0, 1), (-1, 0)][f["back"]]
     g.pos, g.facing = (p[0] - dx, p[1] - dy), f["back"]
     assert g.what_at(p) == f["name"] and f["name"] in scan(g, g.facing)
 
 
-def test_two_hits_smoke_then_explode():
-    g = bare()
+def test_five_damage_stages_then_explode_on_sixth_hit():
+    g = bare(3)                                  # 第 3 關起才會爆炸
     g.pos, g.facing = (1, 1), 0                  # 面向牆
-    ev = g.step() if g.set_plan([{"op": "forward", "n": 1}]) is None else []
-    assert [e["type"] for e in ev] == ["collision", "damaged"] and g.damage == 1 and not g.over
+    for stage in range(1, 6):
+        g.set_plan([{"op": "forward", "n": 1}])
+        ev = g.step()
+        assert [e["type"] for e in ev] == ["collision", "damaged"] and ev[-1]["stage"] == stage
+        assert g.damage == stage and not g.over
     g.set_plan([{"op": "forward", "n": 1}])
     ev = g.step()
     assert [e["type"] for e in ev][:3] == ["collision", "exploded", "level_fail"]
-    assert g.failed == "exploded" and g.damage == 2
-    assert [f[1] for f in g.fx] == ["bump", "smoke", "bump", "boom"]
+    assert g.failed == "exploded" and g.damage == 6
+    assert [f[1] for f in g.fx][-2:] == ["bump", "boom"]                      # 特效只留最近 10 筆
+    assert [f[5].get("stage") for f in g.fx if f[1] == "smoke"][-3:] == [3, 4, 5]
 
 
 @pytest.mark.parametrize("obj", ["sock", "puddle", "lego", "cable", "poop"])
@@ -128,7 +133,43 @@ def test_quake_and_toolbox_incidents():
 def test_eval_level_is_not_fragile():
     g = Game("eval")
     g.set_plan([{"op": "forward", "n": 30}])
-    assert "damaged" not in [e["type"] for e in run_to_end(g)] and g.damage == 0 and not g.furniture
+    types = [e["type"] for e in run_to_end(g)]
+    assert "damaged" not in types and g.damage == 0 and not g.furniture
+    assert "collision" in types
+
+
+# ---------- 新手關不爆炸、充電座修理 ----------
+
+@pytest.mark.parametrize("level_id", [0, 1, 2])
+def test_tutorial_levels_never_explode(level_id):
+    g = bare(level_id)
+    g.pos, g.facing = (1, 1), 0
+    for _ in range(8):
+        g.set_plan([{"op": "forward", "n": 1}])
+        ev = run_to_end(g)
+        assert [e["type"] for e in ev] == ["collision", "damaged"]
+    assert g.damage == 5 and not g.over and "新手關不會爆炸" in ev[-1]["msg"]
+    assert [f[1] for f in g.fx][-2:] == ["bump", "smoke"]
+
+
+def test_later_levels_still_explode():
+    assert all(get_level(lv).get("explode", True) for lv in CAMPAIGN if lv >= 3)
+    assert not any(get_level(lv).get("explode", True) for lv in (0, 1, 2))
+
+
+def test_dock_repairs_one_damage():
+    g = bare(5)
+    g.damage = 1
+    hx, hy = g.home
+    g.pos, g.facing = (hx, hy + 1), 0            # 充電座在正北方一格
+    g.set_plan([{"op": "forward", "n": 1}])
+    types = [e["type"] for e in run_to_end(g)]
+    assert types[0] == "docked" and "dock_repair" in types and g.damage == 0 and g.fx[-1][1] == "repair"
+    g.damage = 1
+    g.set_plan([{"op": "return_home"}])          # 已經在充電座上 → 一樣會修
+    assert "dock_repair" in [e["type"] for e in run_to_end(g)] and g.damage == 0
+    g.set_plan([{"op": "return_home"}])          # 沒壞就不會有修理事件
+    assert "dock_repair" not in [e["type"] for e in run_to_end(g)]
 
 
 def test_scene_state_has_furniture_fx_and_damage():
@@ -142,9 +183,11 @@ def test_scene_state_has_furniture_fx_and_damage():
 
 
 def test_session_explosion_ends_level(session_factory):
-    s = session_factory(0)
-    s.game.pos, s.game.facing = (1, 1), 0
-    s.game.damage = 1
+    s = session_factory(3)
+    s.game.pos, s.game.facing = s.game.home, 0
+    while not s.game.is_blocked(s.game.front()):
+        s.game.pos = s.game.front()
+    s.game.damage = 5
     s.apply("往前", {"actions": [{"op": "forward", "n": 1}], "say": "衝", "ok": True})
     events = s.tick()
     types = [e["type"] for e in events]
