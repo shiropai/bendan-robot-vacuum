@@ -9,6 +9,9 @@ EVENT_BP = {
     "entered_forbidden": 18, "smeared": 25, "slip": 3, "suck_water": 12, "doorbell": 4,
     "out_of_battery": 20, "no_path": 4, "dazed": 6, "refused": 5, "suck_empty": 1, "quirk": 4, "forgot": 3,
     "leak": 2,
+    # v8
+    "damaged": 10, "exploded": 25, "fell": 10, "banana": 4, "sucked_bad": 6, "quake": 6, "roach": 8,
+    "banana_drop": 1, "caught_roach": -15, "popcorn": 3, "coin": -2, "cat_ride": -4, "repaired": -6, "toolbox": -2,
     "cleaned": -4, "charged": -2, "level_clear": -20,
 }
 

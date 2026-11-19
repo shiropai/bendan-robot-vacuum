@@ -354,6 +354,31 @@ LEVELS = {
 }
 
 CAMPAIGN = [k for k in LEVELS if isinstance(k, int)]   # 依序解鎖的關卡
+
+# v8：受損規則（撞到／亂吸 → 冒煙 → 爆炸）之外，再依難度加上新事件與地洞（地洞在放大地圖時才挖，見 furnish.py）
+_RIDE = {"type": "cat_ride", "chance": 0.08, "max": 1}
+_TOOL = {"type": "toolbox", "chance": 0.12, "max": 1}          # 只有笨笨冒煙時才會出現
+_ROACH = {"type": "roach", "chance": 0.025, "max": 1}
+_BANANA = {"type": "banana", "chance": 0.03, "max": 1}
+_QUAKE = {"type": "quake", "chance": 0.012, "max": 1}
+_POP = {"type": "popcorn", "chance": 0.02, "max": 1}
+V8_EXTRAS = {
+    0: (0, [_TOOL]),
+    1: (0, [_RIDE, _TOOL]),
+    2: (1, [_POP, _TOOL]),
+    3: (1, [_RIDE, _ROACH, _TOOL]),
+    4: (1, [_BANANA, _TOOL]),
+    5: (2, [_ROACH, dict(_BANANA, max=2), _TOOL]),
+    6: (1, [_QUAKE, _POP, _TOOL]),
+    7: (1, [_RIDE, _BANANA, _TOOL]),
+    8: (2, [_ROACH, _POP, _TOOL]),
+    9: (2, [_QUAKE, _TOOL]),
+    10: (2, [_QUAKE, _ROACH, _BANANA, _RIDE, _TOOL]),
+}
+for _lid, (_holes, _inc) in V8_EXTRAS.items():
+    LEVELS[_lid]["holes"] = _holes
+    LEVELS[_lid]["incidents"] = list(LEVELS[_lid].get("incidents", [])) + [dict(i) for i in _inc]
+LEVELS["eval"].update(fragile=False, furnish=False)    # 評估場景維持原本規則（才能跟以前的結果比）
 FINAL_LEVEL = CAMPAIGN[-1]
 
 

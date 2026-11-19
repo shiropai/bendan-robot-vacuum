@@ -31,6 +31,8 @@ EVENT_MOOD = {
     "lego": -6, "tangled": -4, "jammed": -4, "collision": -2, "sucked_dog": -5, "smeared": -8, "slip": -2,
     "suck_water": -6, "low_battery": -3, "doorbell": +2,
     "cleaned": +3, "charged": +6, "level_clear": +10, "sucked_cat": +1,   # 吸到貓……它其實有點得意
+    "damaged": -8, "fell": -6, "banana": -3, "sucked_bad": -4, "quake": -3,              # v8
+    "caught_roach": +5, "coin": +4, "cat_ride": +8, "repaired": +8, "toolbox": +3,
 }
 
 PROMPTS = {

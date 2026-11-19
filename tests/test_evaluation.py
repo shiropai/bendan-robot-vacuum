@@ -1,6 +1,6 @@
 from bendan.evaluation import (TEST_SET, normalize, plot_mood_eval, plot_summary, run_eval, run_mood_eval,
                                short_to_actions, summarize_eval, summarize_mood_eval)
-from bendan.render import hud_html, render_ascii, render_png
+from bendan.render import hud_html, render_ascii
 
 
 def test_normalize_equivalences():
@@ -26,9 +26,7 @@ def test_mood_eval_with_fake_llm():
 
 def test_renderers(session_factory):
     s = session_factory(4, "silly")
-    assert render_png(s.game, mood="鬧彆扭", emotion="生氣")[:4] == b"\x89PNG"
     s.game.fail("owner_faint", "x")
-    assert render_png(s.game)[:4] == b"\x89PNG"
     assert "G" in render_ascii(s.game)
     assert "主人血壓" in hud_html(s, "hi", [{"type": "lego", "msg": "痛"}])
 

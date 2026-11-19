@@ -99,7 +99,7 @@ class Session:
         self.gameplay = gameplay
         self.guardrail = guardrail             # True＝程式攔截闖禁區的計畫（新手友善；關掉才看得到 LLM 闖禁區的笑點）
         self.seed = seed
-        self.view = "iso"                     # 畫面視角：iso＝2.5D、top＝俯視（UI 用）
+        self.view = "3d"                      # v8：遊戲視窗只有 3D；文字模式用俯視 SVG
         self.game = None
         self.reset(level_id)
 

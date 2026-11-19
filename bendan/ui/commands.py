@@ -5,19 +5,16 @@ from ..world.levels import CAMPAIGN, get_level, level_title
 HELP = """<div style='font-family:sans-serif;font-size:13px'>
 <b>斜線指令</b>：<code>/levels</code> 選關畫面｜<code>/level 3</code>、<code>/level daily</code> 換關｜<code>/next</code> 下一關｜
 <code>/reset</code> 重來｜<code>/mode serious</code>、<code>/mode silly</code> 換模式｜<code>/achievements</code> 成就｜
-<code>/guard</code> 開關禁區護欄｜<code>/view</code> 切換 2.5D／俯視／3D 視角｜<code>/unlock</code> 解鎖全部關卡｜<code>q</code> 離開<br>
+<code>/guard</code> 開關禁區護欄｜<code>/unlock</code> 解鎖全部關卡｜<code>q</code> 離開<br>
 <b>玩法提示</b>：說「請」「謝謝」、稱讚它、道歉 → 笨笨心情變好、比較聽話、比較少恍神；罵它、催它、一直重複 → 它會頂嘴甚至罷工。
 出包會讓主人血壓飆高，爆表就失敗。「停」「回充」永遠有效。<br>
-<b>看方向</b>：笨笨身上的黃色箭頭＝正前方；前方格子上的 1、2、3… 是「往前走幾格」；
-「左」「右」標在它的左手邊、右手邊（是笨笨的左右，不是螢幕的左右）。</div>"""
+<b>小心受損</b>：撞到牆、家具、寵物，或吸到襪子、水、樂高、電線、便便 → 第一次冒煙 💨，第二次直接爆炸 💥（這關失敗）。
+掉進地洞 🕳️ 也會摔壞；撿到維修包 🧰 可以修好一次。<br>
+<b>看方向</b>：3D 畫面預設相機跟在笨笨背後（畫面的左右＝笨笨的左右），笨笨身上的黃色箭頭和 LED 眼睛朝向正前方；
+畫面右上角可以切換 🎥 跟隨／👀 笨笨視角／🗺️ 俯瞰／📹 監視器。</div>"""
 
-VIEWS = ["iso", "top", "3d"]
-VIEW_NAMES = {"iso": "🔄 2.5D 視角：看指北針分辨方向。", "top": "🔄 俯視視角：地圖上方＝北。",
-              "3d": "🧊 3D 視角：相機跟在笨笨背後，畫面的左右就是笨笨的左右！（文字模式會改用 2.5D）"}
-
-
-def next_view(view):
-    return VIEWS[(VIEWS.index(view) + 1) % len(VIEWS)] if view in VIEWS else "iso"
+VIEW_TEXT = ("🧊 v8 起遊戲畫面只有 3D：畫面右上角可以切換 🎥 跟隨／👀 笨笨視角／🗺️ 俯瞰／📹 監視器。"
+             "（文字模式用俯視地圖）")
 
 
 COAX_LINES = ["笨笨你好棒，拜託你了～", "對不起剛剛太兇了，你最乖了！", "謝謝笨笨，辛苦了！"]
@@ -85,8 +82,7 @@ def handle_slash(session, text):
         state = "開啟：闖禁區的計畫會被程式攔下" if session.guardrail else "關閉：笨笨可能會闖禁區（血壓 +18）"
         return {"say": f"🛡️ 護欄{state}。", "html": ""}
     if cmd == "view":
-        session.view = arg.strip() if arg.strip() in VIEW_NAMES else next_view(getattr(session, "view", "iso"))
-        return {"say": VIEW_NAMES[session.view], "html": ""}
+        return {"say": VIEW_TEXT, "html": ""}
     if cmd == "unlock":
         session.progress.unlock_all = True
         return {"say": "🔓 全部關卡解鎖！", "html": levels_html(session.progress)}

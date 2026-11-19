@@ -1,4 +1,4 @@
-"""SVG 畫面、方向輔助、HUD、遊戲視窗（不需要瀏覽器的部分）。"""
+"""俯視 SVG（文字模式用）、HUD、3D 遊戲視窗（不需要瀏覽器的部分）。"""
 import json
 import time
 
@@ -10,27 +10,24 @@ from bendan.world import CAMPAIGN, Game
 
 
 @pytest.mark.parametrize("level_id", CAMPAIGN + ["daily"])
-@pytest.mark.parametrize("view", ["iso", "top"])
-def test_svg_renders_every_level(level_id, view):
-    svg = render_svg(Game(level_id), view=view, thinking=True, mood="不爽", emotion="生氣")
+def test_svg_renders_every_level(level_id):
+    svg = render_svg(Game(level_id), thinking=True, mood="不爽", emotion="生氣")
     assert svg.startswith("<svg") and svg.endswith("</svg>") and "viewBox" in svg
+    assert "data-proj='top'" in svg and "iso" not in svg          # v8：2.5D 等角視角已移除
 
 
 @pytest.mark.usefixtures("small_maps")
 def test_no_floor_numbers_or_side_labels_and_facing_text():
     """v7：地板不再標 1 2 3…、也沒有「左／右／後」字樣（看笨笨的箭頭就知道朝向）。"""
     g = Game(0)                      # 起點 (2,3) 面東，前方 5 格空地
-    for view in ("iso", "top"):
-        svg = render_svg(g, view=view)
-        assert ">左<" not in svg and ">右<" not in svg and ">後<" not in svg and ">1<" not in svg
+    svg = render_svg(g)
+    assert ">左<" not in svg and ">右<" not in svg and ">後<" not in svg and ">1<" not in svg
     assert facing_text(g).startswith("面向東") and "前方是牆壁" in facing_text(g) and "格" not in facing_text(g)
 
 
-def test_widget_board_leaves_robot_to_frontend():
+def test_top_view_draws_furniture():
     g = Game(3)
-    with_bot, without = render_svg(g), render_svg(g, robot=False)
-    assert "bd-botlayer" in without and "data-proj='iso'" in without and len(without) < len(with_bot)
-    assert "data-proj='top'" in render_svg(g, view="top", robot=False)
+    assert g.furniture and "🛋️" in render_svg(g) or "📚" in render_svg(g)
 
 
 def test_end_banner_and_fog():
@@ -62,12 +59,12 @@ def test_widget_game_window_smoke(progress):
             time.sleep(0.01)
         assert ui.session.history[-1]["cmd"] == "請往前走三格然後吸"
         ui._render(force=True)
-        assert "請往前走三格然後吸" in ui.history.value and "<svg" in ui.board.value
+        assert "請往前走三格然後吸" in ui.history.value and "<svg" not in ui.board.value     # v8：只有 3D
+        st = json.loads(ui.board.value.split("class='bd-state'>")[1].split("</script>")[0])
+        assert (st["robot"]["x"], st["robot"]["y"]) == ui.session.game.pos and "furniture" in st
+        assert "bd-assets" in ui.assets3d.value and not hasattr(ui, "btn_view")
         bot = json.loads(ui.botw.value.split("'bd-botjs'>")[1].split("</script>")[0])
         assert (bot["x"], bot["y"]) == ui.session.game.pos and bot["tts"] and bot["sayN"] >= 2
-        ui._on_view(None)
-        ui._render(force=True)
-        assert ui.session.view == "top"
     finally:
         ui.quit()
     assert ui.cmd.disabled and "window.close" in ui.head.value
@@ -87,12 +84,10 @@ def test_scene_state_for_3d():
     assert json.loads(data)["w"] == Game(0).w
 
 
-def test_view_cycles_through_3d(session_factory):
+def test_view_command_explains_3d_only(session_factory):
     from bendan.ui.commands import handle_slash
     s = session_factory(0)
-    assert [handle_slash(s, "/view") and s.view for _ in range(3)] == ["top", "3d", "iso"]
-    handle_slash(s, "/view 3d")
-    assert s.view == "3d"
+    assert "3D" in handle_slash(s, "/view")["say"] and s.view == "3d"
 
 
 def test_3d_asset_bundle_has_furniture_and_pets():
@@ -107,4 +102,18 @@ def test_3d_asset_bundle_has_furniture_and_pets():
 
 def test_scene3d_js_is_embedded_in_game_window():
     from bendan.ui.widget_mode import SCENE3D_JS, _js_loader
-    assert "ROOM_FURNITURE" in SCENE3D_JS and "/*SCENE3D*/" not in _js_loader()
+    assert "FURN_MODELS" in SCENE3D_JS and "WALL_H = 2.4" in SCENE3D_JS and "/*SCENE3D*/" not in _js_loader()
+
+
+def test_scene3d_models_cover_every_furniture_key():
+    """v8：furnish.py 會擺的每一種家具，3D 都要有對應的模型（而且模型檔真的存在）。"""
+    import re
+
+    from bendan.render.assets3d import ASSET_DIR
+    from bendan.ui.widget_mode import SCENE3D_JS
+    from bendan.world.furnish import NAMES
+    block = SCENE3D_JS.split("var FURN_MODELS = {")[1].split("};")[0]
+    keys = set(re.findall(r"(\w+): \[\[", block))
+    assert set(NAMES) <= keys
+    for name in set(re.findall(r"'(\w+)'", block)):
+        assert (ASSET_DIR / "furniture" / f"{name}.obj").exists(), name

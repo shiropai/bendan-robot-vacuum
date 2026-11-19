@@ -103,7 +103,10 @@ def describe_world(game, hints=False, vision=None):
     for label, off in [("前方", 0), ("右手邊", 1), ("左手邊", 3), ("後方", 2)]:
         lines.append(f"- {label}：{scan(game, (game.facing + off) % 4, max_dist=vision or 16)}")
     state = ["你現在正在一直往前開（等主人喊停）" if game.driving else "你現在停著",
-             "吸塵模式：" + ("開（走過的格子會順便吸）" if game.vacuum else "關")]
+             "吸塵模式：" + ("開（走過的格子會順便吸）" if game.vacuum else "關"),
+             "機身：" + ("正常" if game.damage == 0 else "冒煙中！再撞到東西或吸到怪東西就會爆炸，要非常小心")]
+    if game.rider:
+        state.append("背上載著一隻貓（撞到東西會把牠嚇跑）")
     lines.append("。".join(state) + "。")
     here = game.objects.get(game.pos)
     if game.pos in game.dirt:

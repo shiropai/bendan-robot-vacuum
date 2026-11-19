@@ -1,9 +1,9 @@
 """🎮 遊戲視窗（ipywidgets）：像遊戲一樣的單一畫面，可以「彈出成獨立視窗」或全螢幕。
 
     ┌ 🧹 笨笨掃地機  第 3 關……            [🪟 彈出成獨立視窗] [⛶ 全螢幕] ┐
-    │ 選關｜賣蠢/正經｜🔄 視角｜↺ 重來｜下一關 ▶｜📋 說明｜結束             │
-    │ ┌──────────── 遊戲畫面（SVG）────────────┐ ┌──── 右側面板 ────┐ │
-    │ │  黃箭頭＝前方、1 2 3＝往前幾格、左／右   │ │ 🧭 面向東 ➡       │ │
+    │ 選關｜賣蠢/正經｜🔊｜↺ 重來｜下一關 ▶｜📋 說明｜結束                 │
+    │ ┌──────── 遊戲畫面（3D，Three.js）────────┐ ┌──── 右側面板 ────┐ │
+    │ │ 🎥跟隨／👀笨笨視角／🗺️俯瞰／📹監視器     │ │ 🧭 面向東 ➡       │ │
     │ └─────────────────────────────────────────┘ │ 🔋💗🩸 量表        │ │
     │ 🤖 笨笨：「收到，但撞到不是我的錯」            │ 難度標籤、事件     │ │
     │ [ 跟笨笨說話…    ][送出][🎤][✋ 停！][🔋 回充][💗 哄一下]  └──────────┘ │
@@ -36,7 +36,7 @@ from pathlib import Path
 
 from ..gameplay.progress import Progress
 from ..gameplay.scoring import stars_text
-from ..render import bubble_html, history_html, render_svg, side_html
+from ..render import bubble_html, history_html, side_html
 from ..render.board import EMOTION_ICON, MOOD_LID
 from ..render.scene import scene_html
 from ..session import EXECUTOR, Session
@@ -96,7 +96,15 @@ body.bendan-popup-body{overflow:auto!important;margin:0;background:#fffdf8!impor
 .bd-keys{font-size:11px;color:#888;margin:2px 0 4px}
 .bd-3dhost{position:relative;width:100%;min-height:120px}
 .bd-3dhost canvas{width:100%!important;height:auto!important;border-radius:12px;display:block;touch-action:none}
-.bd-3dbar{position:absolute;top:8px;right:8px;display:flex;gap:4px}
+.bd-3dbar{position:absolute;top:8px;right:8px;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.bd-3dbar .bd-btn{background:rgba(255,255,255,.88);font-size:13px;padding:4px 8px}
+.bd-3dbar .bd-btn.on{background:#ffb703;border-color:#c98a00;font-weight:bold}
+.bd-3dhint{position:absolute;left:10px;bottom:8px;font-size:11px;color:#fff;background:rgba(0,0,0,.35);border-radius:6px;padding:1px 6px;pointer-events:none}
+.bd-rec{display:none;position:absolute;left:12px;top:10px;font:bold 13px monospace;color:#ff4d4d;text-shadow:0 0 3px #000;pointer-events:none}
+.bd-cctv .bd-rec{display:block}
+.bd-cctv canvas{filter:grayscale(.45) contrast(1.15) brightness(1.05)}
+.bd-cctv:after{content:'';position:absolute;inset:0;border-radius:12px;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.08) 0 2px,transparent 2px 4px),radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.45))}
 .bd-3dover{display:none;position:absolute;left:0;right:0;top:42%;text-align:center;font-size:40px;font-weight:bold;
   color:#2a9d8f;background:rgba(255,255,255,.85);padding:6px 0}
 .bd-3dmsg{padding:40px;text-align:center;color:#666}
@@ -322,7 +330,7 @@ var tries = 0;
   // ===== v7：笨笨連續移動（每移動一格或轉 90 度＝30 幀）=====
   // 遊戲邏輯還是格子（房間、灰塵、碰撞都用格子算，LLM 也用格子描述），但畫面上的笨笨由前端自己畫：
   // Python 每個 tick 送來「笨笨現在在哪一格、面向哪」，這裡把上一格 → 這一格切成 30 個畫格播放，
-  // 效果等於把地圖放大 30 倍、笨笨每幀走 1/30 格。2D（.bd-botlayer）和 3D（scene3d.js）共用同一個 Motion。
+  // 效果等於把地圖放大 30 倍、笨笨每幀走 1/30 格（3D 場景 scene3d.js 用這個 Motion）。
   var FRAMES = 30;
   function Motion() {
     var cur = null, q = [], seg = null, lastT = 0, ema = 0;
@@ -356,85 +364,19 @@ var tries = 0;
         }
         return cur;
       },
-      moving: function () { return !!seg || q.length > 0; }
+      moving: function () { return !!seg || q.length > 0; },
+      jump: function (x, y, r) { q = []; seg = null; cur = { x: x, y: y, r: r }; lastT = Date.now(); }   // 瞬間移動（掉洞後被撈回充電座）
     };
   }
 
-  // ---- 2D：笨笨畫在 SVG 的 .bd-botlayer（地圖 SVG 換新時把同一個笨笨搬過去，動畫不中斷）----
-  var bot = { m: Motion(), st: null, raw: '', g: null, arrow: null, key: '', chain: 0, last: 0 };
-  function svgEsc(t) { return String(t).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
-  function arrowPts(x, y, vx, vy, len, w) {
-    var px = -vy, py = vx, sh = len * 0.55, bx = x + vx * sh, by = y + vy * sh;
-    return [[x + px * w * .35, y + py * w * .35], [bx + px * w * .35, by + py * w * .35], [bx + px * w, by + py * w],
-            [x + vx * len, y + vy * len], [bx - px * w, by - py * w], [bx - px * w * .35, by - py * w * .35],
-            [x - px * w * .35, y - py * w * .35]].map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
-  }
-  function botLabel(y, txt) {
-    return "<rect x='-24' y='" + (y - 10) + "' width='48' height='20' rx='6' fill='white' fill-opacity='.85' stroke='#555'/>" +
-           "<text x='0' y='" + y + "' text-anchor='middle' dominant-baseline='central' font-size='12'>" + txt + "</text>";
-  }
-  function buildBot(layer, svg) {
-    var st = bot.st, iso = svg.getAttribute('data-proj') === 'iso', c = +(svg.getAttribute('data-cell') || 42), h;
-    if (iso) {
-      h = "<ellipse cx='0' cy='2' rx='20' ry='10.5' fill='#000' fill-opacity='.18'/>" +
-          "<ellipse cx='0' cy='0' rx='17' ry='8.5' fill='#22324a'/><rect x='-17' y='-11' width='34' height='11' fill='#3d5a80'/>" +
-          "<ellipse cx='0' cy='-11' rx='17' ry='8.5' fill='" + st.lid + "' stroke='#3d5a80' stroke-width='1.5'/>";
-    } else {
-      h = "<circle cx='0' cy='0' r='" + (c * 0.4).toFixed(1) + "' fill='" + st.lid + "' stroke='#22324a' stroke-width='3'/>";
-    }
-    h += "<polygon class='bd-botarrow' fill='#ffb703' stroke='#5c4100' stroke-width='1.4'/>";
-    if (st.low) h += "<circle cx='9' cy='" + (iso ? -13 : -c * 0.2) + "' r='3.5' fill='#ff1744' class='bd-blink'/>";
-    if (st.think) h += botLabel(iso ? -41 : -c / 2 - 6, '🤔 …');
-    else if (st.emo) h += "<text x='" + (iso ? 0 : 16) + "' y='" + (iso ? -39 : -c / 2 + 2) + "' text-anchor='middle' dominant-baseline='central' font-size='" + (iso ? 20 : 16) + "'>" + svgEsc(st.emo) + "</text>";
-    if (!bot.g) bot.g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    bot.g.setAttribute('class', 'bd-bot');
-    bot.g.innerHTML = h;
-    bot.arrow = bot.g.querySelector('.bd-botarrow');
-    if (bot.g.parentNode !== layer) layer.appendChild(bot.g);
-    bot.key = [iso, c, st.lid, st.low, st.think, st.emo].join('|');
-    drawBot();
-  }
-  function drawBot() {
-    var g = bot.g, svg = g && g.ownerSVGElement;
-    if (!svg || !g.isConnected) return;
-    var p = bot.m.at(Date.now());
-    if (!p) return;
-    var iso = svg.getAttribute('data-proj') === 'iso', gx = Math.sin(p.r), gy = -Math.cos(p.r), cx, cy, vx, vy;
-    if (iso) {
-      var tw = +svg.getAttribute('data-tw'), th = +svg.getAttribute('data-th');
-      cx = +svg.getAttribute('data-ox') + (p.x - p.y) * tw / 2; cy = +svg.getAttribute('data-oy') + (p.x + p.y + 1) * th / 2;
-      vx = (gx - gy) * tw / 2; vy = (gx + gy) * th / 2;
-    } else {
-      var c = +svg.getAttribute('data-cell'), pad = +svg.getAttribute('data-pad');
-      cx = pad + (p.x + 0.5) * c; cy = pad + (p.y + 0.5) * c; vx = gx; vy = gy;
-    }
-    var n = Math.hypot(vx, vy) || 1; vx /= n; vy /= n;
-    g.setAttribute('transform', 'translate(' + cx.toFixed(2) + ',' + cy.toFixed(2) + ')');
-    bot.arrow.setAttribute('points', iso ? arrowPts(0, -11, vx, vy, 30, 9) : arrowPts(-vx * 6, -vy * 6, vx, vy, 30, 9));
-  }
-  function botFrames(id) {                       // requestAnimationFrame 迴圈（彈出視窗後要用新視窗的 rAF）
-    if (id !== bot.chain || !root.isConnected) return;
-    bot.last = Date.now();
-    drawBot();
-    (root.ownerDocument.defaultView || window).requestAnimationFrame(function () { botFrames(id); });
-  }
-  setInterval(function () {                      // 彈出／收回視窗時 rAF 鏈可能斷掉 → 重新接上
-    if (root.isConnected && Date.now() - bot.last > 600) { bot.chain++; botFrames(bot.chain); }
-  }, 400);
+  // 笨笨的即時狀態（隱藏的 .bd-botjs）：朗讀笨笨的話、音效開關。畫面上的笨笨由 3D 場景畫（scene3d.js）
+  var bot = { st: null, raw: '' };
   function botSync() {
     var el = q('.bd-botjs');
-    if (el && el.textContent !== bot.raw) {
-      bot.raw = el.textContent;
-      try { bot.st = JSON.parse(bot.raw); } catch (err) { return; }
-      var s = bot.st;
-      bot.m.push(s.x, s.y, s.f * Math.PI / 2, (s.tick || 0.5) * 1000, Date.now());
-      speakLine(s);
-    }
-    if (!bot.st) return;
-    var svg = q('svg.bendan-board'), layer = svg && svg.querySelector('.bd-botlayer');
-    if (!layer) return;
-    var st = bot.st, key = [svg.getAttribute('data-proj') === 'iso', +(svg.getAttribute('data-cell') || 42), st.lid, st.low, st.think, st.emo].join('|');
-    if (!bot.g || bot.g.parentNode !== layer || bot.key !== key) buildBot(layer, svg);
+    if (!el || el.textContent === bot.raw) return;
+    bot.raw = el.textContent;
+    try { bot.st = JSON.parse(bot.raw); } catch (err) { return; }
+    speakLine(bot.st);
   }
 
   // ===== v7：🔊 笨笨說話（瀏覽器內建語音合成，不用裝東西；Mac 有「美佳」、Chrome 有「Google 國語（臺灣）」）=====
@@ -471,7 +413,7 @@ var tries = 0;
     S.speak(u);
   }
   new MutationObserver(botSync).observe(root, { subtree: true, childList: true, characterData: true });
-  botSync(); botFrames(bot.chain);
+  botSync();
 
 /*SCENE3D*/
   setTimeout(function () { var i = input(); if (i && !root.__win) i.focus(); }, 400);
@@ -505,7 +447,7 @@ CLOSE_POPUP = ("<img src='data:,' alt='' style='display:none' onerror=\"var r=th
 
 
 class WidgetGame:
-    def __init__(self, level=0, mode="silly", tick=0.5, feedback_rounds=1, progress=None, seed=None, view="iso",
+    def __init__(self, level=0, mode="silly", tick=0.5, feedback_rounds=1, progress=None, seed=None, view="3d",
                  stt=None, tts=True):
         import ipywidgets as W
         self.W = W
@@ -527,8 +469,9 @@ class WidgetGame:
         self.js = W.HTML(_js_loader())
         self.head = W.HTML()
         self.board = W.HTML()
-        self.board3d = W.HTML("<div class='bd-3dhost'></div>", layout=W.Layout(display="none"))   # Three.js 畫在這裡
-        self.assets3d = W.HTML("", layout=W.Layout(display="none"))   # 3D 素材包（第一次切到 3D 才送）
+        self.board3d = W.HTML("<div class='bd-3dhost'></div>")   # Three.js 畫在這裡（v8 起是唯一的遊戲畫面）
+        from ..render.assets3d import assets_html
+        self.assets3d = W.HTML(assets_html(), layout=W.Layout(display="none"))   # 3D 素材包（家具、寵物），一開始就送
         self.side = W.HTML()
         self.bubble = W.HTML()
         self.history = W.HTML()
@@ -546,7 +489,6 @@ class WidgetGame:
         self.dd_level = W.Dropdown(options=self._level_options(), value=level, layout=W.Layout(width="270px"))
         self.tb_mode = W.ToggleButtons(options=[("賣蠢", "silly"), ("正經", "serious")], value=mode,
                                        style={"button_width": "56px"}, tooltips=["賣蠢模式", "正經模式（對照組）"])
-        self.btn_view = W.Button(description="🔄 視角", tooltip="切換 2.5D → 俯視 → 3D", layout=W.Layout(width="80px"))
         self.btn_reset = W.Button(description="↺ 重來", layout=W.Layout(width="74px"))
         self.btn_next = W.Button(description="下一關 ▶", layout=W.Layout(width="88px"))
         self.btn_info = W.ToggleButton(description="📋 關卡／成就／說明", tooltip="選關、成就與指令說明",
@@ -568,14 +510,13 @@ class WidgetGame:
         self.btn_coax.on_click(self._on_coax)
         self.dd_level.observe(self._on_level, names="value")
         self.tb_mode.observe(self._on_mode, names="value")
-        self.btn_view.on_click(self._on_view)
         self.btn_reset.on_click(lambda _: self._reset(self.session.game.level_id))
         self.btn_next.on_click(self._on_next)
         self.btn_info.observe(self._on_info, names="value")
         self.tb_tts.observe(lambda _: setattr(self, "dirty", True), names="value")
         self.btn_quit.on_click(lambda _: self.quit())
 
-        controls = W.HBox([self.dd_level, self.tb_mode, self.btn_view, self.tb_tts, self.btn_reset, self.btn_next,
+        controls = W.HBox([self.dd_level, self.tb_mode, self.tb_tts, self.btn_reset, self.btn_next,
                            self.btn_info, self.btn_quit])
         inputrow = W.HBox([self.cmd, self.btn_send, self.mic, self.btn_stop, self.btn_home, self.btn_coax])
         left = W.VBox([self.board, self.board3d, self.bubble, inputrow, self.keys, self.history])
@@ -587,7 +528,7 @@ class WidgetGame:
         self.box = W.VBox([self.js, self.head, controls, main, self.extra, self.audio_in, self.assets3d, self.botw])
         self.box.add_class("bendan-game")
         self._controls = [self.cmd, self.btn_send, self.btn_stop, self.btn_home, self.btn_coax, self.dd_level,
-                          self.tb_mode, self.btn_view, self.tb_tts, self.btn_reset, self.btn_next, self.btn_info,
+                          self.tb_mode, self.tb_tts, self.btn_reset, self.btn_next, self.btn_info,
                           self.btn_quit]
         self.alive = threading.Event()
         self.alive.set()
@@ -733,12 +674,6 @@ class WidgetGame:
         self.say = f"切換成{'正經' if change['new'] == 'serious' else '賣蠢'}模式。"
         self.dirty = True
 
-    def _on_view(self, _):
-        from .commands import VIEW_NAMES, next_view
-        self.session.view = next_view(self.session.view)
-        self.say = VIEW_NAMES[self.session.view]
-        self.dirty = True
-
     def _on_level(self, change):
         if self._busy_ui:
             return
@@ -841,13 +776,7 @@ class WidgetGame:
         s = self.session
         with s.lock:
             mood = s.mood.name if s.gameplay and s.mode == "silly" else None
-            if s.view == "3d":
-                if not self.assets3d.value:
-                    from ..render.assets3d import assets_html
-                    self.assets3d.value = assets_html()
-                board = scene_html(s.game, mood=mood, emotion=s.emotion, thinking=thinking, tick=self.tick_s)
-            else:
-                board = render_svg(s.game, view=s.view, mood=mood, max_width=920, robot=False)   # 笨笨由前端畫
+            board = scene_html(s.game, mood=mood, emotion=s.emotion, thinking=thinking, tick=self.tick_s)
             values = {
                 "board": board,
                 "side": side_html(s, self.events),
@@ -856,7 +785,6 @@ class WidgetGame:
                 "head": self._head_html(),
                 "botw": self._bot_html(mood),
             }
-        self.board3d.layout.display = None if s.view == "3d" else "none"
         for name, value in values.items():
             w = getattr(self, name)
             if w.value != value:
@@ -872,11 +800,12 @@ class WidgetGame:
         self._render(force=True)
 
 
-def play_widgets(level=None, mode="silly", tick=0.5, feedback_rounds=1, unlock_all=False, seed=None, view="iso",
+def play_widgets(level=None, mode="silly", tick=0.5, feedback_rounds=1, unlock_all=False, seed=None, view="3d",
                  voice="auto", tts=True):
     """▶️ 遊戲視窗（推薦）。level=None 會從「還沒破的第一關」開始。
 
     tick：笨笨每移動一格（或轉 90 度）要幾秒；畫面上分成 30 幀播放（0.5 秒 ≈ 60 fps）。
+    view：保留相容用；v8 起遊戲畫面只有 3D（相機在畫面右上角切換：跟隨／笨笨視角／俯瞰／監視器）。
     tts：True＝笨笨的回答用瀏覽器的語音唸出來（畫面上的 🔊 可以隨時關掉）。
     voice："auto"＝有裝 Whisper 就用（按住 🎤 說話）；"off"＝不用 Whisper（🎤 改用瀏覽器語音辨識）；
     也可以直接給 `bendan.voice.connect_stt(...)` 回傳的後端。

@@ -25,7 +25,7 @@ def test_drive_keeps_going_until_wall():
         g.step()
     assert g.driving and g.pos[0] == x0 + 3            # 還在開，沒有自己停
     events = run_to_end(g)
-    assert not g.driving and events[-1]["type"] == "collision" and g.pos[0] == g.w - 2
+    assert not g.driving and [e["type"] for e in events[-2:]] == ["collision", "damaged"] and g.is_blocked(g.front())
 
 
 def test_vacuum_mode_cleans_on_the_way_and_jams_on_sock():
@@ -36,7 +36,7 @@ def test_vacuum_mode_cleans_on_the_way_and_jams_on_sock():
     g.set_plan([{"op": "vacuum_on"}, {"op": "drive"}])
     events = run_to_end(g)
     types = [e["type"] for e in events]
-    assert types[:1] == ["vacuum"] and "cleaned" in types and types[-1] == "jammed"
+    assert types[:1] == ["vacuum"] and "cleaned" in types and types[-2:] == ["jammed", "damaged"]
     assert g.pos == (5, 1) and not g.vacuum and not g.queue
 
 
