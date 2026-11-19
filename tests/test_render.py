@@ -117,3 +117,25 @@ def test_scene3d_models_cover_every_furniture_key():
     assert set(NAMES) <= keys
     for name in set(re.findall(r"'(\w+)'", block)):
         assert (ASSET_DIR / "furniture" / f"{name}.obj").exists(), name
+
+
+def test_widget_title_screen_start_and_back(progress):
+    pytest.importorskip("ipywidgets")
+    from bendan.ui.widget_mode import WidgetGame
+    ui = WidgetGame(0, "serious", tick=0.01, progress=progress, seed=0)
+    try:
+        assert ui.on_title and ui.title_screen.layout.display == "flex" and ui.game_screen.layout.display == "none"
+        assert "bd-cover-main" in ui.cover.value and "data:image/jpeg;base64," in ui.cover.value
+        assert ui.dd_level in ui.title_screen.children and ui.btn_start in ui.title_screen.children
+        assert not hasattr(ui, "btn_next")                                   # 遊戲中不能選關
+        ui.dd_level.value = 2
+        assert "第 2 關" in ui.level_info.value and ui.session.game.level_id == 0   # 選了還沒開始
+        ui._on_start(None)
+        assert not ui.on_title and ui.session.game.level_id == 2 and ui.game_screen.layout.display == "flex"
+        assert "data-act='cam'" in ui._head_html()                           # 右上：換視角
+        ui._take_input("/level 5")
+        assert ui.session.game.level_id == 2 and "返回" in ui.say            # 遊戲中打指令也不能換關
+        ui._on_back(None)
+        assert ui.on_title and ui.title_screen.layout.display == "flex"
+    finally:
+        ui.quit()

@@ -1123,7 +1123,7 @@
       var btn = bar.querySelector('[data-camnext]');
       CAMS.forEach(function (k) { if (k[0] === c) btn.textContent = k[1] + ' ▸'; });
       host.classList.toggle('bd-cctv', c === 'cctv');
-      hint.textContent = { follow: '相機跟在笨笨背後：畫面的左右＝笨笨的左右', eye: '笨笨的眼睛看出去', top: '俯瞰：在畫面上拖曳轉視角、滾輪縮放（牆會自動降低）', cctv: '房間角落的監視器' }[c];
+      hint.textContent = { follow: '🎥 跟隨：相機在笨笨背後，畫面的左右＝笨笨的左右', eye: '👀 笨笨視角：笨笨的眼睛看出去', top: '🗺️ 俯瞰：在畫面上拖曳轉視角、滾輪縮放（牆會自動降低）', cctv: '📹 監視器：房間角落的監視器' }[c];
     }
     setCam('follow');
     var drag = null, cvs = renderer.domElement;
@@ -1306,7 +1306,8 @@
     }
     loop();
     // 除錯用：在瀏覽器 console 可以看場景狀況（root.__bendan3d.info()）
-    root.__bendan3d = { scene: scene, camera: camera, setCam: setCam, info: function () {
+    root.__bendan3d = { scene: scene, camera: camera, setCam: setCam,
+      cycleCam: function () { var i = 0; CAMS.forEach(function (c, k) { if (c[0] === cam) i = k; }); setCam(CAMS[(i + 1) % CAMS.length][0]); return cam; }, info: function () {
       var n = 0; scene.traverse(function (o) { if (o.isMesh) n++; });
       return { cam: cam, cut: cut, meshes: n, furniture: furnGroups.length, lamps: lamps.length, walls: wallMeshes.length, parts: parts.length,
                robot: robot.position.toArray(), bump: bump.off.toArray(), dmg: dmg, wrecked: wrecked, cats: pets.cat.length, roaches: pets.roach.length, lastFx: lastFx };
