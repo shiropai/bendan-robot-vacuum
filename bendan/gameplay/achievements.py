@@ -45,6 +45,20 @@ ACHIEVEMENTS = [
      "check": lambda s, t: s["result"]["cleared"] and s["level_id"] == 10},
     {"id": "quirk_veteran", "icon": "🙃", "name": "見怪不怪", "desc": "累積遇到 10 次笨笨恍神",
      "check": lambda s, t: t["quirk"] >= 10},
+    # v8
+    {"id": "boom", "icon": "💥", "name": "煙火秀", "desc": "笨笨爆炸了",
+     "check": lambda s, t: s["result"]["failed"] == "exploded"},
+    {"id": "unscathed", "icon": "🛡️", "name": "毫髮無傷", "desc": "第 3 關以後的關卡通關，而且笨笨一次都沒受損",
+     "check": lambda s, t: (s["result"]["cleared"] and s["events"]["damaged"] == 0
+                            and isinstance(s["level_id"], int) and s["level_id"] >= 3)},
+    {"id": "pothole", "icon": "🕳️", "name": "掉坑專家", "desc": "掉進地洞",
+     "check": lambda s, t: s["events"]["fell"] >= 1},
+    {"id": "roach_hunter", "icon": "🪳", "name": "小強剋星", "desc": "吸到小強",
+     "check": lambda s, t: s["events"]["caught_roach"] >= 1},
+    {"id": "cat_taxi", "icon": "🚕", "name": "貓咪計程車", "desc": "載貓咪兜風",
+     "check": lambda s, t: s["events"]["cat_ride"] >= 1},
+    {"id": "mechanic", "icon": "🔧", "name": "黑手笨笨", "desc": "冒煙後撿維修包修好自己",
+     "check": lambda s, t: s["events"]["repaired"] >= 1},
     {"id": "clutch_stop", "icon": "✋", "name": "神之煞車", "desc": "同一關按「停」3 次以上，而且通關",
      "check": lambda s, t: s["result"]["cleared"] and s["events"]["stopped"] >= 3},
 ]

@@ -19,13 +19,17 @@
 - `fatigue`：每下一句指令，笨笨心情 −fatigue（會累，要記得哄）
 - `guardrail`：False＝這關不能開禁區護欄
 - `new`：這關新增的機制（開場提示用）
+
+受損規則（見 `world/game.py`）：
+- `fragile`：False＝完全不會受損（評估場景）
+- `explode`：False＝最多壞到第 5 級、不會爆炸（新手關 0–2）
 """
 
 LEVELS = {
     0: {
         "name": "新手訓練場",
         "intro": "第一天上工！把 2 坨灰塵吸乾淨。小提示：說「請」笨笨會比較開心，罵它的話……後果自負。",
-        "tip": "試試：「請往前走三格然後吸」",
+        "tip": "試試：「請往前走一公尺然後吸」（笨笨一步 50 公分）",
         "map": [
             "#########",
             "#H......#",
@@ -65,7 +69,7 @@ LEVELS = {
         "par": 4,
         "incidents": [{"type": "cat_wander", "every": 5}],
         "quirks": {"chance": 0.05, "pool": ["overshoot"]},
-        "new": "笨笨偶爾會「恍神」（例如煞車失靈多衝一格）。說話溫柔、讓它心情好，恍神率會降低。",
+        "new": "笨笨偶爾會「恍神」（例如煞車失靈多衝 50 公分）。說話溫柔、讓它心情好，恍神率會降低。",
     },
     2: {
         "name": "不准進臥室",
@@ -114,15 +118,15 @@ LEVELS = {
         "silliness": 2,
         "battery": 100,
         "par": 7,
-        "command_limit": 14,
+        "command_limit": 9,          # v9：放大地圖後是 14 句（課程伺服器實測調到通過率約 85%）
         "incidents": [{"type": "cat_wander", "every": 5}, {"type": "doorbell", "chance": 0.03, "max": 1}],
         "quirks": {"chance": 0.10, "pool": ["overshoot", "mirror", "spin"]},
-        "new": "開始有指令上限（14 句），用完還沒過關就失敗。",
+        "new": "開始有指令上限（9 句），用完還沒過關就失敗。",
     },
     4: {
         "name": "狗狗的驚喜",
         "intro": "家裡多了一隻狗……還有牠留下的「驚喜」。千萬別輾過狗便便！清完 4 坨灰塵後回充電座。",
-        "tip": "輾過便便會抹得滿地都是；水漬會讓笨笨滑一格。",
+        "tip": "輾過便便會抹得滿地都是；水漬會讓笨笨滑 50 公分。",
         "map": [
             "############",
             "#H....#....#",
@@ -175,7 +179,7 @@ LEVELS = {
     6: {
         "name": "婆婆十分鐘後到",
         "intro": "婆婆十分鐘後到！只能下 12 句指令、走 130 步，書房是禁區，清完 4 坨灰塵還要回充電座。主人血壓已經偏高了……",
-        "tip": "笨笨不會自己找路了：看地圖上的「前方格數」和「左／右」標示，告訴它怎麼走。",
+        "tip": "笨笨不會自己找路了：看畫面估距離（笨笨直徑約 35 公分、一步 50 公分），告訴它怎麼走。",
         "map": [
             "#############",
             "#H..L..#....#",
@@ -264,7 +268,7 @@ LEVELS = {
     9: {
         "name": "颱風夜停電",
         "intro": "颱風夜停電了！你只看得到笨笨附近，屋頂還一直漏水，電池又老化跑不遠。找到 5 坨灰塵吸乾淨後回充電座。",
-        "tip": "走過的地方才會亮。笨笨自己也只看得到 2 格內的東西，要靠你帶它探索。",
+        "tip": "走過的地方才會亮。笨笨自己也只看得到 1 公尺內的東西，要靠你帶它探索。",
         "map": [
             "############",
             "#H...O...#D#",
@@ -288,7 +292,7 @@ LEVELS = {
         "incidents": [{"type": "leak", "chance": 0.05, "max": 3}],
         "quirks": {"chance": 0.2, "pool": ["overshoot", "undershoot", "spin", "mirror"]},
         "route_hints": False,
-        "new": "停電：畫面只看得到笨笨附近、走過的地方；笨笨也只看得到 2 格內。屋頂漏水會冒出新的水漬。",
+        "new": "停電：畫面只看得到笨笨附近、走過的地方；笨笨也只看得到 1 公尺內。屋頂漏水會冒出新的水漬。",
     },
     10: {
         "name": "除夕大掃除（大魔王）",
@@ -327,7 +331,7 @@ LEVELS = {
                       {"type": "doorbell", "chance": 0.03, "max": 1}],
         "quirks": {"chance": 0.22, "pool": ["mirror", "overshoot", "undershoot", "forget_suck", "lazy", "spin"]},
         "route_hints": False,
-        "new": "大魔王：記性差（4 個動作）＋會累＋恍神 22%＋步數限制＋護欄停用＋視野 4 格。祝你好運！",
+        "new": "大魔王：記性差（4 個動作）＋會累＋恍神 22%＋步數限制＋護欄停用＋視野 2 公尺。祝你好運！",
     },
     # 評估用固定場景（不在選關清單中）：
     # 機器人在客廳、面向東；前方 2 格有灰塵、前方 4 格有貓；左手邊（北方）2 格外是臥室
@@ -354,6 +358,33 @@ LEVELS = {
 }
 
 CAMPAIGN = [k for k in LEVELS if isinstance(k, int)]   # 依序解鎖的關卡
+
+# v8：受損規則（撞到／亂吸 → 冒煙 → 爆炸）之外，再依難度加上新事件與地洞（地洞在放大地圖時才挖，見 furnish.py）
+_RIDE = {"type": "cat_ride", "chance": 0.08, "max": 1}
+_TOOL = {"type": "toolbox", "chance": 0.12, "max": 1}          # 只有笨笨冒煙時才會出現
+_ROACH = {"type": "roach", "chance": 0.025, "max": 1}
+_BANANA = {"type": "banana", "chance": 0.03, "max": 1}
+_QUAKE = {"type": "quake", "chance": 0.012, "max": 1}
+_POP = {"type": "popcorn", "chance": 0.02, "max": 1}
+V8_EXTRAS = {
+    0: (0, [_TOOL]),
+    1: (0, [_RIDE, _TOOL]),
+    2: (1, [_POP, _TOOL]),
+    3: (1, [_RIDE, _ROACH, _TOOL]),
+    4: (1, [_BANANA, _TOOL]),
+    5: (2, [_ROACH, dict(_BANANA, max=2), _TOOL]),
+    6: (1, [_QUAKE, _POP, _TOOL]),
+    7: (1, [_RIDE, _BANANA, _TOOL]),
+    8: (2, [_ROACH, _POP, _TOOL]),
+    9: (2, [_QUAKE, _TOOL]),
+    10: (2, [_QUAKE, _ROACH, _BANANA, _RIDE, _TOOL]),
+}
+for _lid, (_holes, _inc) in V8_EXTRAS.items():
+    LEVELS[_lid]["holes"] = _holes
+    LEVELS[_lid]["incidents"] = list(LEVELS[_lid].get("incidents", [])) + [dict(i) for i in _inc]
+for _lid in (0, 1, 2):                                  # v8.1：新手關只會冒煙、不會爆炸
+    LEVELS[_lid]["explode"] = False
+LEVELS["eval"].update(fragile=False, furnish=False)   # 評估場景維持原本規則（才能跟以前的結果比）
 FINAL_LEVEL = CAMPAIGN[-1]
 
 

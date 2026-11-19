@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config, llm
+from .world.units import fmt_len
 from .agent import Agent, Memory, actions_to_text, guard_forbidden, update_rules_from_text
 from .gameplay import (BloodPressure, IncidentDirector, Mood, Progress, Scoreboard, analyze_tone,
                        check_achievements, stars_text)
@@ -66,13 +67,13 @@ def pick_quote(quotes):
 
 STOP_RE = re.compile(r"\s*(停|停止|停下|停下來|煞車|別動|stop)[!！。.\s]*", re.I)
 HOME_RE = re.compile(r"回充|充電|回家|回去充")
-# 整句只是「回去充電」→ 跟「停」一樣直接處理（實測：模型常在 return_home 前自己加「前進 10 格」，撞牆就回不了家）
+# 整句只是「回去充電」→ 跟「停」一樣直接處理（實測：模型常在 return_home 前自己加「前進 5 公尺」，撞牆就回不了家）
 GO_HOME_RE = re.compile(r"\s*(請|麻煩|拜託)?\s*(你|笨笨)?\s*(快)?\s*(回到?充電座|回去充電座?|回充電座?|回充|回家|去充電)"
                         r"\s*(吧|啦|喔|了|好嗎|謝謝)?[!！。.~～\s]*")
 # v6 連續移動：「往前」「前進」「直走」沒講距離 → 一直開到喊停。
 # 實測 Qwen2.5-7B 賣蠢模式常把「往前」寫成 forward 1（只走一小格），Prompt 規定了也壓不住 → 由程式校正。
 DRIVE_RE = re.compile(r"往前|向前|前進|直走|直直走|衝")
-COUNT_RE = re.compile(r"([0-9]+|[一二兩三四五六七八九十幾半])\s*(格|步|公尺|米|下|點)|一點|一下|一些|一小段")
+COUNT_RE = re.compile(r"([0-9]+|[一二兩三四五六七八九十幾半])\s*(格|步|公尺|米|公分|厘米|下|點)|一點|一下|一些|一小段|[0-9]+\s*(cm|m)\b")
 EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 
@@ -94,12 +95,12 @@ class Session:
         self.lock = threading.RLock()
         self.logger = logger or JsonlLogger()
         self.progress = progress if progress is not None else Progress()
-        self.agent = Agent(mode, seed=seed, route_hints=gameplay)
+        self.agent = Agent(mode, seed=seed, route_hints=gameplay, flavor=gameplay)
         self.feedback_rounds = feedback_rounds   # 事件回饋最多幾輪（0 = 不回饋）
         self.gameplay = gameplay
         self.guardrail = guardrail             # True＝程式攔截闖禁區的計畫（新手友善；關掉才看得到 LLM 闖禁區的笑點）
         self.seed = seed
-        self.view = "iso"                     # 畫面視角：iso＝2.5D、top＝俯視（UI 用）
+        self.view = "3d"                      # v8：遊戲視窗只有 3D；文字模式用俯視 SVG
         self.game = None
         self.reset(level_id)
 
@@ -177,7 +178,7 @@ class Session:
         if g.dark:
             out.append(("🌑", "停電：只看得到附近"))
         if cfg.get("vision"):
-            out.append(("👓", f"笨笨只看得到 {cfg['vision']} 格內"))
+            out.append(("👓", f"笨笨只看得到 {fmt_len(cfg['vision'])} 內"))
         if cfg.get("fatigue"):
             out.append(("😪", f"會累：每句話心情 −{cfg['fatigue']}"))
         if not self.guard_allowed:
@@ -412,6 +413,7 @@ class Session:
             "events": types, "interrupted": interrupted, "replaced": replaced,
             "forbidden_violation": "entered_forbidden" in types,
             "quirk": r.get("quirk"), "forgot": r.get("forgot", False), "llm_actions": r.get("llm_actions"),
+            "flavor": r.get("flavor"), "temperature": r.get("temperature"),
         })
         entry = cur.get("entry")
         if entry is not None:

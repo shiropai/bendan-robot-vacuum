@@ -6,6 +6,7 @@ import json
 import re
 
 from ..world.constants import ACTION_WHITELIST, MAX_ACTIONS, MAX_FORWARD
+from ..world.units import cells_from_cm
 from .prompts import EMOTIONS
 
 
@@ -23,6 +24,13 @@ def to_traditional(text):
     for s, t in _S2T_PHRASES.items():
         text = text.replace(s, t)
     return text.translate(str.maketrans(_S2T))
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _as_int(n):
@@ -70,9 +78,15 @@ def validate_output(obj):
             errors.append(f"不在選單內的動作：{op!r}")
             continue
         if op == "forward":
-            n = _as_int(a.get("n"))
+            # 單位是公分（"cm"）；也接受公尺（"m"）和舊格式的格數（"n"，一格 50 公分）
+            if "cm" in a:
+                n = cells_from_cm(a["cm"])
+            elif "m" in a:
+                n = cells_from_cm(_num(a["m"]) * 100) if _num(a["m"]) is not None else None
+            else:
+                n = _as_int(a.get("n"))
             if n is None or not 1 <= n <= MAX_FORWARD:
-                errors.append(f"forward 的 n 不合法：{a.get('n')!r}")
+                errors.append(f"forward 的距離不合法：{a.get('cm', a.get('m', a.get('n')))!r}")
                 continue
             clean.append({"op": "forward", "n": n})
         elif op in REPEATABLE and "n" in a:

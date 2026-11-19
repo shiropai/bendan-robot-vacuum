@@ -6,6 +6,8 @@
 import json
 import random
 import re
+
+from ..world.units import parse_length_cells
 import time
 
 MAX_FORWARD = 60
@@ -50,11 +52,11 @@ def parse_simple_command(cmd):
             acts += [{"op": "turn_left"}] * (k if "轉" in c else 1)
         elif "右" in c:
             acts += [{"op": "turn_right"}] * (k if "轉" in c else 1)
-        n = re.search(NUM_RE + r"\s*(格|步)", c)
+        n = parse_length_cells(c)           # 「1.5 公尺」「五十公分」「三格」→ 格數（一格 50 公分）
         if n:
-            acts.append({"op": "forward", "n": min(cn_to_int(n.group(1)), MAX_FORWARD)})
+            acts.append({"op": "forward", "n": min(n, MAX_FORWARD)})
         elif re.search(r"前進|往前|直走|衝|走", c):
-            acts.append({"op": "drive"})      # v6：沒講格數 → 一直往前開，等主人喊停
+            acts.append({"op": "drive"})      # v6：沒講距離 → 一直往前開，等主人喊停
     return acts
 
 

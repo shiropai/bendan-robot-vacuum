@@ -40,8 +40,8 @@ def test_collision_interrupts_plan():
     g = Game(1)
     g.set_plan([{"op": "turn_left"}, {"op": "forward", "n": 9}, {"op": "suck"}])
     events = run_to_end(g)
-    assert events[-1]["type"] == "collision"
-    assert not g.queue
+    assert [e["type"] for e in events[-2:]] == ["collision", "damaged"]     # v8：撞到會受損（冒煙）
+    assert not g.queue and g.damage == 1
 
 
 def test_lego_is_consumed_and_interrupts():

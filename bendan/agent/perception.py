@@ -1,48 +1,50 @@
 """世界狀態描述：以機器人為中心的相對描述。
 
-7B 模型座標推理弱，所以不給完整座標，而是告訴模型：「你面向東，前方可以走 3 格，第 2 格有灰塵……」，
+7B 模型座標推理弱，所以不給完整座標，而是告訴模型：「你面向東，前方可以再開 1.5 公尺，前進 1 公尺處有灰塵……」，
 讓「蠢」集中在有趣的地方，而不是無意義的座標計算錯誤。
 """
 import json
 
-from ..world.constants import DIR_NAMES, DIRS, OBJECT_NAMES
+from ..world.constants import DIR_NAMES, DIRS, MAX_DAMAGE, OBJECT_NAMES
+from ..world.units import fmt_len, to_cm
 
 
 def rel(game, target):
-    """把目標換算成「前/後方 k 格、左/右方 m 格」。"""
+    """把目標換算成「前/後方 1 公尺、左/右方 50 公分」。"""
     dx, dy = target[0] - game.pos[0], target[1] - game.pos[1]
     fx, fy = DIRS[game.facing]
     rx, ry = DIRS[(game.facing + 1) % 4]
     fwd, right = dx * fx + dy * fy, dx * rx + dy * ry
     parts = []
     if fwd:
-        parts.append(f"{'前' if fwd > 0 else '後'}方 {abs(fwd)} 格")
+        parts.append(f"{'前' if fwd > 0 else '後'}方 {fmt_len(abs(fwd))}")
     if right:
-        parts.append(f"{'右' if right > 0 else '左'}方 {abs(right)} 格")
+        parts.append(f"{'右' if right > 0 else '左'}方 {fmt_len(abs(right))}")
     return "、".join(parts) or "就在你腳下"
 
 
 def scan(game, d, max_dist=16):
-    """沿某個方向看出去：能走幾格、路上有什麼、最後撞到什麼。"""
+    """沿某個方向看出去：還能開多遠、路上有什麼、最後會撞到什麼（距離＝要前進多少才到那裡）。"""
     dx, dy = DIRS[d]
     x, y = game.pos
     notes, free, end, prev = [], 0, "更遠處看不清楚", game.pos
     for k in range(1, max_dist + 1):
         p = (x + dx * k, y + dy * k)
         if game.is_blocked(p):
-            end = f"第 {k} 格是{game.what_at(p)}"
+            end = f"再往前就會撞到{game.what_at(p)}"
             break
         free = k
+        at = f"前進 {fmt_len(k)} 處"
         if game.in_forbidden(p) and not game.in_forbidden(prev):
-            notes.append(f"第 {k} 格起是禁區「{game.room_of(p)}」")
+            notes.append(f"{at}開始是禁區「{game.room_of(p)}」")
         if p in game.dirt:
-            notes.append(f"第 {k} 格有灰塵")
+            notes.append(f"{at}有灰塵")
         if p in game.objects:
-            notes.append(f"第 {k} 格有{OBJECT_NAMES[game.objects[p]]}")
+            notes.append(f"{at}有{OBJECT_NAMES[game.objects[p]]}")
         if p == game.home:
-            notes.append(f"第 {k} 格是充電座")
+            notes.append(f"{at}是充電座")
         prev = p
-    head = f"可以走 {free} 格" if free else "無法前進"
+    head = f"可以再開 {fmt_len(free)}" if free else "一動就會撞到"
     return head + (f"（{'；'.join(notes)}）" if notes else "") + f"，{end}"
 
 
@@ -61,6 +63,11 @@ def path_to_actions(path, facing):
             actions[-1]["n"] += 1
         f = d
     return actions
+
+
+def llm_actions(actions):
+    """引擎的動作（forward 用格數 n）→ 給 LLM 看的動作（forward 用公分 cm）。"""
+    return [{"op": "forward", "cm": to_cm(a["n"])} if a["op"] == "forward" else a for a in actions]
 
 
 def route_hints(game, max_dirt=1, max_actions=None):
@@ -86,7 +93,7 @@ def route_hints(game, max_dirt=1, max_actions=None):
             note, acts = "", acts + [{"op": "suck"}]
         else:
             note, acts = "（路線比較長，先走前半段，走完再問我）", acts[:limit]
-        js = json.dumps(acts, ensure_ascii=False)
+        js = json.dumps(llm_actions(acts), ensure_ascii=False)
         lines.append(f"- 去吸最近那坨灰塵（{rel(game, p)}）{note}：{js}")
     if lines:
         lines.insert(0, "【路線提示】主人叫你去吸灰塵、但沒講怎麼走時，可以直接照下面的 actions 走（已避開禁區和障礙）：")
@@ -103,7 +110,14 @@ def describe_world(game, hints=False, vision=None):
     for label, off in [("前方", 0), ("右手邊", 1), ("左手邊", 3), ("後方", 2)]:
         lines.append(f"- {label}：{scan(game, (game.facing + off) % 4, max_dist=vision or 16)}")
     state = ["你現在正在一直往前開（等主人喊停）" if game.driving else "你現在停著",
-             "吸塵模式：" + ("開（走過的格子會順便吸）" if game.vacuum else "關")]
+             "吸塵模式：" + ("開（走過的格子會順便吸）" if game.vacuum else "關"),
+             "機身：" + ("正常" if game.damage == 0
+                        else f"受損 {game.damage}/{MAX_DAMAGE - 1} 級，要小心（新手關不會爆炸；回充電座 return_home 可以修一級）"
+                        if not game.can_explode
+                        else f"受損 {game.damage}/{MAX_DAMAGE - 1} 級！再出事 {MAX_DAMAGE - game.damage} 次就會爆炸"
+                             "（回充電座 return_home 可以修一級）")]
+    if game.rider:
+        state.append("背上載著一隻貓（撞到東西會把牠嚇跑）")
     lines.append("。".join(state) + "。")
     here = game.objects.get(game.pos)
     if game.pos in game.dirt:
@@ -118,7 +132,7 @@ def describe_world(game, hints=False, vision=None):
             tag = "〔禁區內，不能去〕" if game.in_forbidden(p) else ""
             lines.append(f"- {rel(game, p)}（{game.room_of(p)}）{tag}")
     elif dirt:
-        lines.append(f"還剩 {len(dirt)} 坨灰塵，但你附近 {vision} 格內都看不到，要照主人說的路線走。")
+        lines.append(f"還剩 {len(dirt)} 坨灰塵，但你附近 {fmt_len(vision)} 內都看不到，要照主人說的路線走。")
     else:
         lines.append("灰塵已經全部清乾淨了！")
     if game.home:

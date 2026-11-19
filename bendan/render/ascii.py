@@ -6,7 +6,8 @@ OBJ_CHAR = {v: k for k, v in OBJECT_CHARS.items()}
 
 
 EMOJI = {"wall": "⬛", "floor": "⬜", "forbidden": "🟥", "dirt": "🟫", "home": "🔋", "cat": "🐱", "dog": "🐶",
-         "lego": "🧱", "sock": "🧦", "cable": "➰", "poop": "💩", "puddle": "💧"}
+         "lego": "🧱", "sock": "🧦", "cable": "➰", "poop": "💩", "puddle": "💧", "hole": "🕳️", "banana": "🍌",
+         "toolbox": "🧰", "roach": "🪳"}
 ROBOT_EMOJI = ["⬆️", "➡️", "⬇️", "⬅️"]
 
 

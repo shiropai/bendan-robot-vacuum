@@ -16,7 +16,7 @@
 │   恍神 記性差        │                                 │
 │                   llm/（課程 API ／ FakeLLM）          │
 └─────────────────────────────────────────────────────┘
-          render/（SVG 2.5D／俯視＋方向標示、HUD、ASCII；matplotlib PNG 給報告用）   evaluation/（指標、實驗、圖表）
+          render/（3D 世界狀態 JSON → 前端 Three.js、俯視 SVG、HUD、ASCII）   evaluation/（指標、實驗、圖表）
 ```
 
 **原則：只用結構化資料溝通。** Agent 給「動作清單」（JSON），遊戲回「事件清單」（dict），

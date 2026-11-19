@@ -8,6 +8,7 @@
   → 門口從 1 格變成 k 格寬，連續移動時比較好開進去。
 - 地板、牆壁：整塊照抄。灰塵、充電座、起點、貓狗、樂高……：放在那塊的左上角，其它是地板。
 - 每坨原本的灰塵旁邊（同一個房間、3 格內、走得到）再多一坨 → 灰塵數量加倍。
+- v8：沿牆擺家具（地圖字元 'F'，跟牆一樣擋路）、依 "holes" 挖地洞（'U'），見 `furnish.py`。
 - 依放大倍數一起調整：房間範圍、步數上限 ×2.5、標準句數與指令上限 ×1.5、停電燈光與視野 ×k、
   寵物亂跑的間隔 ×k、每步機率 ÷k，以及介紹文字裡的「N 坨」「走 N 步」。
 """
@@ -16,8 +17,10 @@ import random
 import re
 from collections import deque
 
+from .furnish import furnish
+
 MAP_SCALE = 2
-SPECIAL = set("DH^>v<CGLSWPO")
+SPECIAL = set("DH^>v<CGLSWPOUBKR")
 BLOCK = set("#CG")
 
 
@@ -102,7 +105,12 @@ def scale_level(cfg, k=MAP_SCALE, seed=0):
             added += 1
     ratio = (len(dirt) + added) / len(dirt) if dirt else 1
 
-    out = dict(cfg, map=["".join(r) for r in grid], rooms=rooms, scale=k)
+    # v8：沿牆擺家具（真的障礙物）、挖地洞
+    furniture = []
+    if cfg.get("furnish", True):
+        furniture = furnish(grid, rooms, forbidden, start, random.Random(f"furnish-{seed}"), holes=cfg.get("holes", 0))
+
+    out = dict(cfg, map=["".join(r) for r in grid], rooms=rooms, scale=k, furniture=furniture)
     if cfg.get("step_limit"):
         out["step_limit"] = _round10(cfg["step_limit"] * 2.5)
     for key in ("par", "command_limit"):

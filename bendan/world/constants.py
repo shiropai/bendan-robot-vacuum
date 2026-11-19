@@ -10,13 +10,21 @@ START_FACING = {"^": 0, ">": 1, "v": 2, "<": 3}
 #   'C' 貓（擋路、會亂跑）   'G' 狗（擋路、會亂跑、會大便）
 #   'L' 樂高（踩到會痛）     'S' 襪子（吸到會卡住）   'W' 充電線（會纏住）
 #   'P' 狗便便（輾過會抹得滿地都是）   'O' 水漬（踩到會滑一格；吸到會短路）
-OBJECT_CHARS = {"C": "cat", "G": "dog", "L": "lego", "S": "sock", "W": "cable", "P": "poop", "O": "puddle"}
+#   v8：'U' 地洞（掉下去會摔壞）  'B' 香蕉皮（踩到會打滑轉圈）  'K' 維修包（修好一次損傷）  'R' 蟑螂（會亂跑，吸到有獎勵）
+#       'F' 家具（放大地圖時沿著牆擺，跟牆一樣擋路；名字在關卡設定的 "furniture"）
+OBJECT_CHARS = {"C": "cat", "G": "dog", "L": "lego", "S": "sock", "W": "cable", "P": "poop", "O": "puddle",
+                "U": "hole", "B": "banana", "K": "toolbox", "R": "roach"}
 OBJECT_NAMES = {"cat": "貓", "dog": "狗", "lego": "樂高", "sock": "襪子", "cable": "充電線",
-                "poop": "狗便便", "puddle": "水漬"}
+                "poop": "狗便便", "puddle": "水漬", "hole": "地洞", "banana": "香蕉皮", "toolbox": "維修包",
+                "roach": "蟑螂"}
 PETS = {"cat", "dog"}
 BLOCKING_OBJECTS = {"cat", "dog"}                       # 走不過去
-HAZARD_OBJECTS = {"lego", "cable", "poop", "puddle"}    # 走得過去，但會出事
+HAZARD_OBJECTS = {"lego", "cable", "poop", "puddle", "hole", "banana"}    # 走得過去，但會出事
 AVOID_OBJECTS = HAZARD_OBJECTS | {"sock"}               # 自動導航時盡量避開
+SUCK_BAD = {"sock", "puddle", "lego", "cable", "poop"}  # v8：吸到會受損
+MAX_DAMAGE = 6       # 受損 5 級，第 6 次＝爆炸
+DAMAGE_STAGES = {1: ("💨", "開始冒煙了"), 2: ("⚡", "開始噴火花了"), 3: ("🌫️", "冒出濃煙、燈號亂閃"),
+                 4: ("🔥", "起火了"), 5: ("🚨", "過熱了，紅燈警報狂響")}
 
 ACTION_WHITELIST = {"forward", "drive", "turn_left", "turn_right", "stop", "suck", "vacuum_on", "vacuum_off",
                     "return_home"}
@@ -30,10 +38,11 @@ LOW_BATTERY_RATIO = 0.25
 
 # 會讓動作中斷、需要回報給 LLM 的事件
 INTERRUPT_EVENTS = {"collision", "lego", "tangled", "jammed", "sucked_cat", "sucked_dog", "entered_forbidden",
-                    "no_path", "smeared", "suck_water", "doorbell", "out_of_battery"}
+                    "no_path", "smeared", "suck_water", "doorbell", "out_of_battery", "damaged", "fell", "banana",
+                    "sucked_bad", "quake"}
 
 # 不顯示在事件列表的「安靜事件」（例如寵物換位置）
-QUIET_EVENTS = {"pet_moved", "navigating"}
+QUIET_EVENTS = {"pet_moved", "navigating", "roach_moved"}
 
 KNOWN_ROOMS = ["客廳", "臥室", "廚房", "書房", "浴室"]
 ROOM_ALIASES = {"房間": "臥室", "臥房": "臥室", "睡房": "臥室", "灶腳": "廚房", "工作室": "書房",

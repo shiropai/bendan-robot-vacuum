@@ -16,7 +16,11 @@ EVENT_ICON = {"collision": "💥", "lego": "🧱", "tangled": "🔌", "jammed": 
               "dog_poop": "💩", "doorbell": "🔔", "pet_moved": "🐾", "mood": "💭", "tone": "🗣️", "combo": "🔥",
               "combo_break": "💔", "refused": "🙅", "dazed": "😵", "level_fail": "💀", "level_result": "🏁",
               "achievement": "🏅", "guardrail": "🛡️", "quirk": "🙃", "forgot": "🧠",
-              "leak": "💧", "voice": "🎤", "shout": "📢"}
+              "leak": "💧", "voice": "🎤", "shout": "📢",
+              "damaged": "💨", "exploded": "💥", "fell": "🕳️", "rescued": "🙌", "banana": "🍌", "banana_drop": "🍌",
+              "sucked_bad": "🤢", "quake": "🌏", "roach": "🪳", "caught_roach": "🪳", "cat_ride": "🐱", "cat_off": "🐱",
+              "toolbox": "🔧", "toolbox_drop": "🔧", "repaired": "🔧", "bonus": "🎁", "popcorn": "🍿", "coin": "💰",
+              "dock_repair": "🔧"}
 
 
 def event_line(e):

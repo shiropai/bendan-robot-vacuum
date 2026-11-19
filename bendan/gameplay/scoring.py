@@ -10,8 +10,11 @@ from collections import Counter
 
 from ..world.constants import INTERRUPT_EVENTS
 
-PENALTY = {"entered_forbidden": -100, "smeared": -80, "sucked_cat": -50, "sucked_dog": -40}
+PENALTY = {"entered_forbidden": -100, "smeared": -80, "sucked_cat": -50, "sucked_dog": -40, "damaged": -60}
 DEFAULT_PENALTY = -30
+BONUS = {"caught_roach": ("抓小強", 150), "cat_ride": ("貓咪計程車", 50), "toolbox": ("維修包", 50),
+         "coin": ("撿到零錢", 50)}   # v8
+NO_FAULT = {"quake"}          # 天災不扣分（但一樣會中斷動作、回報給笨笨）
 
 
 class Scoreboard:
@@ -37,6 +40,11 @@ class Scoreboard:
                     bonus = 50 * (self.combo - 1)
                     self._add("連擊", bonus)
                     out.append({"type": "combo", "msg": f"🔥 連擊 x{self.combo}！+{100 + bonus}", "combo": self.combo})
+            elif t in BONUS:
+                self._add(*BONUS[t])
+                out.append({"type": "bonus", "msg": f"🎁 {BONUS[t][0]} +{BONUS[t][1]}"})
+            elif t in NO_FAULT:
+                continue
             elif t in INTERRUPT_EVENTS or t in PENALTY:
                 if self.combo >= 2:
                     out.append({"type": "combo_break", "msg": f"連擊中斷（最高 x{self.combo}）"})
@@ -55,6 +63,8 @@ class Scoreboard:
                 self._add("指令精簡", 40 * (par - n_commands))
             if mood.name == "開心":
                 self._add("笨笨很開心", 100)
+        if cleared and game.fragile and game.damage == 0 and game.level_id != 0:
+            self._add("毫髮無傷", 100)
         stars = 0
         if cleared:
             stars = 1

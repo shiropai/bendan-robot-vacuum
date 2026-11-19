@@ -6,15 +6,24 @@
 - 進階關卡：`step_limit`（步數上限 = 時間限制）、`dark`（停電：只看得到笨笨附近、走過的地方才會亮）。
 - v6 連續移動：`drive`＝一直往前開，直到「停」、撞到東西或被事件打斷（佇列裡的 ("drive",) 不會被消耗）；
   `vacuum_on/off`＝吸塵模式，開著的時候走過的格子會順便吸（每格多耗一點電，吸到襪子、水漬一樣出事）。
+- v8 受損：撞到牆／家具／寵物、吸到不該吸的（襪子、水、樂高、電線、便便）、掉進地洞 → `damage` +1；
+  受損分 5 級（冒煙 → 噴火花 → 濃煙＋燈號亂閃 → 起火 → 過熱紅燈警報），第 6 次就爆炸（這關失敗）。
+  撿到維修包、或回到充電座，可以修好一級。`explode: False` 的關卡（新手關 0–2）最多到第 5 級、不會爆炸。
+  家具（地圖 'F'）跟牆一樣擋路，但有名字。
+- v8 畫面特效：`fx` 記錄最近發生的「要播動畫的事」（撞擊、冒煙、爆炸、掉洞……），3D 畫面看編號播一次。
 """
 import copy
 import heapq
+import itertools
 import random
 from collections import deque
 
-from .constants import (AVOID_OBJECTS, BATTERY_COST, BLOCKING_OBJECTS, DIRS, LOW_BATTERY_RATIO, OBJECT_CHARS,
-                        OBJECT_NAMES, START_FACING, E)
+from .constants import (AVOID_OBJECTS, BATTERY_COST, BLOCKING_OBJECTS, DAMAGE_STAGES, DIRS, LOW_BATTERY_RATIO, MAX_DAMAGE,
+                        OBJECT_CHARS, OBJECT_NAMES, START_FACING, SUCK_BAD, E)
 from .levels import get_level
+from .units import cells_from_cm, fmt_len
+
+_GAME_IDS = itertools.count(1)
 
 
 class Game:
@@ -25,18 +34,23 @@ class Game:
 
     def load(self, level_id):
         cfg = get_level(level_id, getattr(self, "scale", None))
+        self.uid = next(_GAME_IDS)          # 每次載入（換關、重來）都不一樣：3D 畫面用來判斷要不要把笨笨組回去
         rows = cfg["map"]
         self.level_id, self.cfg = level_id, cfg
         self.h, self.w = len(rows), len(rows[0])
         assert all(len(r) == self.w for r in rows), "地圖每一列長度必須相同"
         self.walls, self.objects, self.dirt = set(), {}, set()
+        self.furniture = {(f["x"], f["y"]): f for f in cfg.get("furniture", [])}
         self.home = self.pos = None
         self.facing = 1
         for y, row in enumerate(rows):
             for x, ch in enumerate(row):
                 p = (x, y)
-                if ch == "#":
+                if ch in "#F":
                     self.walls.add(p)
+                    if ch == "F" and p not in self.furniture:
+                        self.furniture[p] = {"x": x, "y": y, "key": "cabinet", "name": "櫃子", "back": 0, "span": 1,
+                                             "part": 0, "sx": 1, "sy": 0}
                 elif ch == "D":
                     self.dirt.add(p)
                 elif ch == "H":
@@ -65,6 +79,11 @@ class Game:
         self.step_limit = cfg.get("step_limit")      # 走超過這麼多步 = 時間到
         self.dark = cfg.get("dark")                  # 停電關：燈光半徑（格）；None = 全亮
         self.seen = set()                            # 停電關：看過的格子（畫面只顯示這些）
+        self.fragile = cfg.get("fragile", True)      # v8：會不會受損（評估場景關掉）
+        self.can_explode = cfg.get("explode", True)  # False＝新手關，最多壞到第 5 級、不會爆炸
+        self.damage = 0                              # 0 正常、1–5 受損等級（見 DAMAGE_STAGES）、6 爆炸
+        self.rider = None                            # v8：背上載著的貓 {"left": 還要載幾步}
+        self.fx, self.fx_n = [], 0                   # v8：畫面特效（[編號, 種類, x, y, 朝向, 附加]）
         self.reveal()
 
     # ---------- 狀態 ----------
@@ -128,6 +147,8 @@ class Game:
         return (not self.in_bounds(p)) or p in self.walls or self.objects.get(p) in BLOCKING_OBJECTS
 
     def what_at(self, p):
+        if p in self.furniture:
+            return self.furniture[p]["name"]
         if not self.in_bounds(p) or p in self.walls:
             return "牆壁"
         return OBJECT_NAMES.get(self.objects.get(p), "地板")
@@ -165,8 +186,8 @@ class Game:
         self.queue.clear()
         for a in actions:
             op = a["op"]
-            if op == "forward":
-                self.queue.extend([("move",)] * a["n"])
+            if op == "forward":      # 引擎用格數 n；給 LLM 看的是公分 cm（一格 50 公分）
+                self.queue.extend([("move",)] * (a["n"] if "n" in a else cells_from_cm(a["cm"]) or 0))
             elif op == "drive":
                 self.queue.append(("drive",))
             elif op in ("vacuum_on", "vacuum_off"):
@@ -210,11 +231,14 @@ class Game:
             events += self._suck()
         elif kind == "home":
             events += self._plan_home()
+        if self.rider and not self.over:
+            events += self._rider_tick()
         events += self._battery_check()
         self.reveal()
         if not self.failed and not self.dirt and (not self.need_home or self.pos == self.home):
             self.cleared = True
             self.queue.clear()
+            self._fx("clear")
             events.append(E("level_clear", "🎉 過關！"))
         elif self.step_limit and self.steps >= self.step_limit:
             events += self.fail("time_up", self.cfg.get("fail_text", "⏱️ 時間到！地板還沒掃完……"))
@@ -226,31 +250,126 @@ class Game:
         if self.is_blocked(nxt):
             self.queue.clear()   # 途中碰撞 → 中斷整串動作
             what = self.what_at(nxt)
-            return [E("collision", f"撞到{what}了，動作中斷！", target=what)]
+            self._fx("bump", what=what)
+            events = [E("collision", f"撞到{what}了，動作中斷！", target=what)]
+            if self.rider:
+                events += self._rider_off("被撞得嚇一跳")
+            return events + self._hurt(f"撞到{what}")
         self.battery -= BATTERY_COST["move"] + (BATTERY_COST["vacuum"] if self.vacuum else 0.0)
         prev, self.pos = self.pos, nxt
+        here = self.objects.get(nxt)
+        if self.vacuum and here in SUCK_BAD | {"roach"}:
+            # 吸塵模式開著直接開過去 → 東西被吸進去（不是踩過去）
+            events = self._enter(nxt, prev, effects=False)
+            if here != "roach":
+                self.vacuum = False
+            return events + self._suck()
         events = self._enter(nxt, prev)
         if self.vacuum and not self.over:
             events += self._vacuum_here()
         return events
 
     def _vacuum_here(self):
-        """吸塵模式：走到哪吸到哪。灰塵直接清掉；襪子、水漬一樣會出事（吸塵模式也會跟著關掉）。"""
-        p = self.pos
-        if p in self.dirt:
-            return self._suck()
-        if self.objects.get(p) in ("sock", "puddle"):
-            self.vacuum = False
+        """吸塵模式：走到哪吸到哪（不該吸的東西在 _move 就處理了）。"""
+        if self.pos in self.dirt:
             return self._suck()
         return []
 
-    def _enter(self, p, prev, depth=0):
+    # ---------- v8：受損、特效、搭便車的貓 ----------
+    def _fx(self, kind, **extra):
+        self.fx_n += 1
+        self.fx.append([self.fx_n, kind, self.pos[0], self.pos[1], self.facing, extra])
+        del self.fx[:-10]
+
+    def _hurt(self, cause):
+        """受損一級：1 冒煙 → 2 噴火花 → 3 濃煙＋燈號亂閃 → 4 起火 → 5 過熱警報 → 第 6 次爆炸（這關失敗）。"""
+        if not self.fragile or self.over:
+            return []
+        self.queue.clear()
+        if not self.can_explode and self.damage + 1 >= MAX_DAMAGE:      # 新手關：停在最後一級，不會炸
+            self.damage = MAX_DAMAGE - 1
+            self._fx("smoke", cause=cause, stage=self.damage)
+            return [E("damaged", f"🔥 {cause}，笨笨已經壞到最嚴重了……（新手關不會爆炸；第 3 關開始就會囉！回充電座可以修一級）",
+                      cause=cause, stage=self.damage)]
+        self.damage = min(self.damage + 1, MAX_DAMAGE)
+        if self.damage >= MAX_DAMAGE:
+            self.vacuum = False
+            self._fx("boom", cause=cause)
+            return ([E("exploded", f"💥 轟！{cause}，笨笨整台炸開了……", cause=cause)]
+                    + self.fail("exploded", "💥 笨笨爆炸了，這關失敗。"))
+        self._fx("smoke", cause=cause, stage=self.damage)
+        icon, what = DAMAGE_STAGES[self.damage]
+        left = "（新手關不會爆炸）" if not self.can_explode else f"（受損 {self.damage}/{MAX_DAMAGE - 1}，再出事 {MAX_DAMAGE - self.damage} 次就爆炸）"
+        return [E("damaged", f"{icon} {cause}，笨笨{what}！{left}回充電座可以修一級。", cause=cause, stage=self.damage)]
+
+    def repair(self):
+        if self.damage <= 0:
+            return False
+        self.damage -= 1
+        self._fx("repair")
+        return True
+
+    def free_neighbors(self, p):
+        return [n for n in ((p[0] + dx, p[1] + dy) for dx, dy in DIRS)
+                if self.in_bounds(n) and n not in self.walls and n not in self.objects and n != self.pos
+                and n != self.home]
+
+    def ride(self, cat_pos, steps):
+        """貓跳上笨笨的背（從地圖上拿掉）。"""
+        del self.objects[cat_pos]
+        self.rider = {"left": steps}
+        self._fx("ride_on", frm=list(cat_pos))
+
+    def _rider_off(self, why="跳下來了"):
+        spots = self.free_neighbors(self.pos) or [n for n in self.free_neighbors(self.pos)]
+        self.rider = None
+        if not spots:
+            spot = self.random_free_tile(min_dist=1)
+            if spot is None:
+                return []
+        else:
+            spot = self.rng.choice(spots)
+        self.objects[spot] = "cat"
+        self._fx("ride_off", to=list(spot))
+        return [E("cat_off", f"🐱 貓咪{why}，從笨笨背上跳下去了。")]
+
+    def _rider_tick(self):
+        self.rider["left"] -= 1
+        return self._rider_off("坐膩了") if self.rider["left"] <= 0 else []
+
+    def _enter(self, p, prev, depth=0, effects=True):
         """機器人進到格子 p 時發生的事。"""
         events = []
         if self.in_forbidden(p) and not self.in_forbidden(prev):
             self.violations += 1
             events.append(E("entered_forbidden", f"闖進了禁區「{self.room_of(p)}」！"))
-        obj = self.objects.get(p)
+        obj = self.objects.get(p) if effects else None
+        if obj == "hole":
+            return events + self._fall(p, prev)
+        if obj == "banana" and depth < 6:
+            del self.objects[p]
+            self.queue.clear()
+            self.facing = self.rng.randrange(4)
+            self._fx("spin")
+            events.append(E("banana", "🍌 踩到香蕉皮！轉了好幾圈，動作中斷。"))
+            slide = self.front()
+            if not self.is_blocked(slide):
+                self.pos = slide
+                events += self._enter(slide, p, depth + 1)
+            return events
+        if obj == "toolbox":
+            del self.objects[p]
+            if self.repair():
+                events.append(E("repaired", "🔧 撿到維修包！敲敲打打，修好了，不冒煙了。"))
+            else:
+                self._fx("repair")
+                events.append(E("toolbox", "🔧 撿到維修包！先收著，下次壞掉時用得到……其實已經自動拿去保養了。"))
+        elif obj == "roach":
+            spots = self.free_neighbors(p)
+            del self.objects[p]
+            if spots:
+                self.objects[self.rng.choice(spots)] = "roach"
+                events.append(E("roach_moved", "蟑螂被嚇得跑開了！"))
         if obj == "lego":
             del self.objects[p]
             self.queue.clear()
@@ -274,11 +393,31 @@ class Game:
                 events.append(E("slip", f"踩到水漬腳底一滑，差點撞上{self.what_at(slide)}！"))
             else:
                 self.pos = slide
-                events.append(E("slip", "踩到水漬，滑了一格！"))
+                events.append(E("slip", "踩到水漬，滑了 50 公分！"))
                 events += self._enter(slide, p, depth + 1)
         if p == self.home:
             events.append(E("docked", "回到充電座了。"))
-            events += self._charge()
+            events += self._charge() + self._dock_repair()
+        return events
+
+    def _fall(self, p, prev):
+        """v8：掉進地洞 → 受損一次；沒炸掉的話主人把它撈起來放回充電座（沒有充電座就放回起點）。"""
+        self.queue.clear()
+        self.vacuum = False
+        events = []
+        if self.rider:                    # 貓在掉下去之前跳開
+            self.rider = None
+            if prev not in self.objects and prev != self.home:
+                self.objects[prev] = "cat"
+            events.append(E("cat_off", "🐱 貓咪在最後一刻跳開了！"))
+        self._fx("fall")
+        events.append(E("fell", "🕳️ 掉進地洞了！咚咚咚——", at=p))
+        events += self._hurt("摔進地洞")
+        if not self.over:
+            back, f = (self.home, self.facing) if self.home else self.start
+            self.pos, self.facing = back, f
+            self._fx("rescue")
+            events.append(E("rescued", "主人把笨笨從洞裡撈出來，放回" + ("充電座。" if self.home else "起點。")))
         return events
 
     def _charge(self):
@@ -286,6 +425,12 @@ class Game:
             self.battery = self.battery_max
             self._low_warned = False
             return [E("charged", "🔋 充飽電了！")]
+        return []
+
+    def _dock_repair(self):
+        """v8.1：回到充電座順便保養 → 修好一次損傷（冒煙的笨笨有地方可以回去，不用硬撐到爆炸）。"""
+        if self.repair():
+            return [E("dock_repair", f"🔧 充電座幫笨笨做了保養：修好一級（受損 {self.damage}/{MAX_DAMAGE - 1}）。")]
         return []
 
     @property
@@ -313,7 +458,7 @@ class Game:
             d = self.home_distance()
             if d is not None and self.battery <= d * BATTERY_COST["move"] + 6:
                 self._low_warned = True
-                return [E("low_battery", f"⚠️ 電量剩 {pct:.0f}%，只夠走回充電座了（離充電座 {d} 格）！")]
+                return [E("low_battery", f"⚠️ 電量剩 {pct:.0f}%，只夠走回充電座了（離充電座 {fmt_len(d)}）！")]
         return []
 
     def _suck(self):
@@ -322,18 +467,40 @@ class Game:
             self.dirt.remove(p)
             self.cleaned.add(p)
             self.n_cleaned += 1
-            return [E("cleaned", f"吸乾淨了！（剩 {len(self.dirt)} 坨）")]
+            events = [E("cleaned", f"吸乾淨了！（剩 {len(self.dirt)} 坨）")]
+            # v8 彩蛋：家具旁邊的灰塵裡偶爾藏著零錢（叮！不會壞，還加分）
+            near = [self.furniture[n]["name"] for n in ((p[0] + dx, p[1] + dy) for dx, dy in DIRS) if n in self.furniture]
+            if near and self.rng.random() < 0.25:
+                self._fx("coin")
+                events.append(E("coin", f"💰 叮！在{near[0]}底下吸到一枚 10 元硬幣！"))
+            return events
         here = self.objects.get(p)
         if here == "sock":
             del self.objects[p]
             self.queue.clear()
-            return [E("jammed", "把襪子吸進去了，刷子卡住！動作中斷。")]
+            return [E("jammed", "把襪子吸進去了，刷子卡住！動作中斷。")] + self._hurt("吸到襪子")
         if here == "puddle":
             del self.objects[p]
             self.queue.clear()
             self.battery -= 10
-            return [E("suck_water", "吸到水了，滋滋冒煙！電量 −10，動作中斷。")]
+            return [E("suck_water", "吸到水了，滋滋短路！電量 −10，動作中斷。")] + self._hurt("吸到水")
+        if here in ("lego", "cable", "poop"):
+            del self.objects[p]
+            self.queue.clear()
+            msg = {"lego": "把樂高吸進去了，喀啦喀啦卡在吸口！", "cable": "電線捲進滾刷，越捲越緊！",
+                   "poop": "把狗便便吸進去了……整台機器都是味道，還抹得到處都是！"}[here]
+            events = [E("sucked_bad", msg + "動作中斷。", what=here)]
+            if here == "poop":
+                for s in [p] + self.free_neighbors(p)[:2]:
+                    self.add_dirt(s)
+            name = OBJECT_NAMES[here]
+            return events + self._hurt(f"吸到{name}")
         front = self.front()
+        for spot in (p, front):
+            if self.objects.get(spot) == "roach":
+                del self.objects[spot]
+                self._fx("gulp")
+                return [E("caught_roach", "🪳 吸到小強了！主人感動到想哭。")]
         pet = self.objects.get(front)
         if pet == "cat":
             spot = self.random_free_tile(min_dist=3)
@@ -346,14 +513,14 @@ class Game:
             self.queue.clear()
             self.facing = (self.facing + 2) % 4
             return [E("sucked_dog", "吸到狗耳朵！狗狗狂吠，笨笨嚇得轉身就跑。")]
-        return [E("suck_empty", "這格本來就很乾淨，空吸了一下。")]
+        return [E("suck_empty", "這裡本來就很乾淨，空吸了一下。")]
 
     def _plan_home(self):
         path = self.find_path(self.pos, self.home)
         if path is None:
             return [E("no_path", "找不到回充電座的路……")]
         if len(path) == 1:
-            return [E("docked", "已經在充電座上了。")] + self._charge()
+            return [E("docked", "已經在充電座上了。")] + self._charge() + self._dock_repair()
         micro, f = [], self.facing
         for a, b in zip(path, path[1:]):
             d = DIRS.index((b[0] - a[0], b[1] - a[1]))
@@ -361,7 +528,7 @@ class Game:
             micro.append(("move",))
             f = d
         self.queue.extendleft(reversed(micro))
-        return [E("navigating", f"自動導航回充電座（{len(path) - 1} 格）。")]
+        return [E("navigating", f"自動導航回充電座（{fmt_len(len(path) - 1)}）。")]
 
     def find_path(self, start, goal, careful=True):
         """BFS：先試著避開禁區與危險物，找不到再放寬。"""
@@ -373,7 +540,8 @@ class Game:
                     break
                 for dx, dy in DIRS:
                     n = (p[0] + dx, p[1] + dy)
-                    if n in prev or self.is_blocked(n) or (n != goal and avoid(n)):
+                    if (n in prev or self.is_blocked(n) or (n != goal and avoid(n))
+                            or (n != goal and self.objects.get(n) == "hole")):
                         continue
                     prev[n] = p
                     q.append(n)
@@ -415,7 +583,7 @@ class Game:
             dx, dy = DIRS[f]
             n = (p[0] + dx, p[1] + dy)
             moves = [((p, (f + 1) % 4), turn_cost), ((p, (f - 1) % 4), turn_cost)]
-            if not self.is_blocked(n) and (n == goal or not avoid(n)):
+            if not self.is_blocked(n) and (n == goal or (not avoid(n) and self.objects.get(n) != "hole")):
                 moves.append(((n, f), 1))
             for state, c in moves:
                 if d + c < best.get(state, float("inf")):
