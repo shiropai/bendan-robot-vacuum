@@ -123,7 +123,7 @@ LLM 只能從固定的**動作選單**中挑選並以 **JSON** 回覆，程式�
 找不到設定時會自動切換成**離線 FakeLLM**（規則式假模型），也能完整測試遊戲。
 '''),
     code(CONNECT),
-    md('### 1B. 選模型\n\n提案預設使用 **Qwen2.5-7B**；也可以改成課程伺服器上的 `llama3.1:8b`、`qwen3-14b`（2026-11-19 實測可用；Qwen3 會先輸出 `<think>` 思考過程，比較慢）比較不同模型「賣蠢」的程度。'),
+    md('### 1B. 選模型\n\n課程伺服器提供三個模型：`qwen2.5:7b`、`llama3.1:8b`、`qwen3-14b`（Context 上限 16,384）。**遊戲主畫面右上角有三個按鈕可以直接切換**；也可以在這裡用程式指定。Qwen3 會自動加上 `/no_think`（不然會先輸出一大段思考過程）。主畫面的「📊 模型跑分」可以看三個模型的比較。'),
     code(MODEL),
     md('### 1C. 量一次延遲\n\n延遲過長是提案中的風險之一；遊戲用**背景執行緒＋思考中動畫**把等待時間藏起來。'),
     code('''r = llm.latency_test()
@@ -191,7 +191,9 @@ display(HTML(difficulty_html()))'''),
 
 沒有 ipywidgets 或遊戲視窗出不來時用這個：在下方輸入框打指令，`q` 離開。對話框下面一樣有指令紀錄。
 '''),
-    code('# ▶️ 執行這格開始玩（文字模式）\nsession = bendan.play(mode="silly")', tags=["interactive"]),
+    code('# ▶️ 文字模式（備用）：把下一行開頭的 # 拿掉再執行這格。\n'
+         '# 預設不執行：它會停下來等你打字，用「Run All」時會卡住 kernel，遊戲視窗的按鈕就按不動了。\n'
+         '# session = bendan.play(mode="silly")', tags=["interactive"]),
     md('## 5｜🏅 進度與成就'),
     code('''from bendan.render import achievements_html
 

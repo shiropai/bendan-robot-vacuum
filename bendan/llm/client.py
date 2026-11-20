@@ -10,6 +10,7 @@
     with llm.using_model("llama3.1:8b"): ...   # 暫時換模型（評估用）
 """
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -58,6 +59,8 @@ def connect(model=None, use_fake=None, verbose=True):
     model = model or os.getenv("BENDAN_MODEL")
     if model:
         set_model(model)
+    elif on_course_server() and STATE.model in COURSE_MODELS:
+        pass                    # 課程伺服器：三個課程模型的名字都能直接用（清單上只列 classroom-llm）
     elif STATE.available_models and resolve_model(STATE.model) is None:
         # 預設模型（qwen2.5:7b）不在這台伺服器上：例如自己電腦只開了一個模型 → 用它
         STATE.model = STATE.available_models[0]
@@ -91,6 +94,21 @@ def list_models(verbose=True):
     return models
 
 
+# 課程伺服器提供的三個模型（2026-11-19 期末專題公告；Context 上限都是 16,384）。
+# 伺服器的模型清單（/v1/models）只列出 classroom-llm，但這三個名字都可以直接用。
+COURSE_MODELS = {"qwen2.5:7b": "Qwen2.5 7B", "llama3.1:8b": "Llama 3.1 8B", "qwen3-14b": "Qwen3 14B"}
+THINK_RE = re.compile(r"<think>.*?(</think>|$)", re.S)
+
+
+def on_course_server():
+    """連的是課程伺服器嗎？（模型清單有 classroom-llm 或課程模型）→ 可以在三個模型之間切換。"""
+    return any(m == "classroom-llm" or m in COURSE_MODELS for m in STATE.available_models or [])
+
+
+def is_qwen3(name):
+    return "qwen3" in (name or "").lower()
+
+
 def _key(name):
     return "".join(ch for ch in name.lower() if ch.isalnum())
 
@@ -112,7 +130,7 @@ def resolve_model(name, available=None):
 
 def set_model(name, check=True):
     _ensure()
-    if check and not STATE.use_fake and STATE.available_models:
+    if check and not STATE.use_fake and STATE.available_models and name not in COURSE_MODELS:
         real = resolve_model(name)
         if real is None:
             raise ValueError(f"模型 {name} 不在可用清單中：{STATE.available_models}")
@@ -141,18 +159,28 @@ def chat(messages, temperature=0.5, max_tokens=300):
     _ensure()
     if STATE.use_fake:
         return STATE.fake.chat(messages, temperature)
+    if is_qwen3(STATE.model) and messages and messages[-1].get("role") == "user":
+        # Qwen3 預設會先輸出一大段 <think> 思考過程（又慢又會被 max_tokens 截斷）。實測課程伺服器：
+        # chat_template_kwargs 會被代理丟掉，只有在訊息最後加 /no_think 有效（會留一個空的 <think></think>，下面剝掉）。
+        messages = messages[:-1] + [dict(messages[-1], content=messages[-1]["content"] + " /no_think")]
     kwargs = dict(model=STATE.model, messages=messages, temperature=temperature, max_tokens=max_tokens, stream=False)
     if STATE.json_mode and STATE.json_supported:
         try:
             resp = STATE.client.chat.completions.create(response_format={"type": "json_object"}, **kwargs)
-            return resp.choices[0].message.content or ""
+            return _clean(resp.choices[0].message.content)
         except Exception as exc:   # noqa: BLE001
             if getattr(exc, "status_code", None) not in (400, 422):
                 raise
             STATE.json_supported = False
             print("⚠️ 伺服器不支援 response_format，改回一般模式。")
     resp = STATE.client.chat.completions.create(**kwargs)
-    return resp.choices[0].message.content or ""
+    return _clean(resp.choices[0].message.content)
+
+
+def _clean(text):
+    """拿掉 Qwen3 的 <think>…</think>（沒有思考內容的模型原樣回傳）。"""
+    text = text or ""
+    return THINK_RE.sub("", text).strip() if "<think>" in text else text
 
 
 def latency_test(prompt="你是一台掃地機器人，用一句話自我介紹。"):

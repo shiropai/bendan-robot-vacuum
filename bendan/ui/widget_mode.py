@@ -39,6 +39,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from .. import llm
 from ..gameplay.progress import Progress
 from ..gameplay.scoring import stars_text
 from ..render import bubble_html, history_html, side_html
@@ -100,9 +101,9 @@ GAME_CSS = """
   width:max-content!important;max-width:none!important;height:auto!important;
   font-size:max(18px,3.6cqw)!important;font-weight:900!important;padding:1.2cqw 4.8cqw!important;border-radius:999px!important;
   background:linear-gradient(180deg,#ffe066,#ff9f1c 60%,#ff7b00)!important;color:#4a2300!important;border:4px solid #fff!important;
-  box-shadow:0 6px 0 #b85600,0 12px 26px rgba(0,0,0,.4)!important;animation:bdpulse 1.6s ease-in-out infinite;z-index:3;line-height:1.3!important}
-.bd-start:hover{filter:brightness(1.08)}
-@keyframes bdpulse{0%,100%{transform:translateY(-50%) scale(1)}50%{transform:translateY(-50%) scale(1.06)}}
+  box-shadow:0 6px 0 #b85600,0 12px 26px rgba(0,0,0,.4)!important;z-index:3;line-height:1.3!important;cursor:pointer}
+.bd-start:hover{filter:brightness(1.1)}
+.bd-start:active{box-shadow:0 2px 0 #b85600!important;margin-top:4px!important}
 .bd-levelpick{position:absolute!important;top:12px;left:12px;z-index:3;width:auto!important;margin:0!important}
 .bd-levelpick select{font-size:15px!important;font-weight:bold;height:36px!important;border-radius:10px!important;border:3px solid #fff!important;
   background:rgba(255,255,255,.95)!important;min-width:260px}
@@ -113,7 +114,25 @@ GAME_CSS = """
 .bd-topbar{align-items:center;gap:6px}
 .bd-topbar>.widget-html{flex:1 1 auto}
 .bd-3dbar{display:none!important}
+.bd-modelpick{position:absolute!important;top:12px;right:12px;z-index:3;width:auto!important;margin:0!important}
+.bd-modelpick .widget-label{color:#fff!important;font-weight:900;text-shadow:0 2px 3px #000}
+.bd-modelpick button{background:rgba(255,255,255,.92)!important;font-weight:bold;border-radius:8px!important;margin-left:3px!important}
+.bd-modelpick button.mod-active{background:#ffb703!important;box-shadow:inset 0 0 0 2px #c98a00!important}
+.bd-benchbtn{position:absolute!important;top:54px;right:12px;z-index:3;width:auto!important;margin:0!important;font-weight:bold!important;
+  border-radius:8px!important;background:rgba(255,255,255,.92)!important}
+.bd-benchbtn.mod-active{background:#ffb703!important}
+.bd-benchpanel{position:absolute!important;top:96px;left:4%;right:4%;bottom:12px;z-index:4;margin:0!important;overflow:auto;
+  background:rgba(255,255,255,.97);border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.45);padding:4px 14px!important}
+.bd-bench h3{margin:6px 0}
+.bd-bench table{border-collapse:collapse;width:100%;font-size:13px;margin:4px 0}
+.bd-bench th,.bd-bench td{border-bottom:1px solid #eee;padding:5px 8px;text-align:center;vertical-align:top}
+.bd-bench tr>th:first-child{text-align:left;white-space:nowrap}
+.bd-bench .bd-tip{font-size:11px;color:#888;font-weight:normal;white-space:normal}
+.bd-bench .bd-bar{height:6px;background:#ff9f1c;border-radius:3px;margin-top:4px}
+.bd-bench .bd-best{background:#e7f7ea;font-weight:bold}
+.bd-benchmeta{font-size:12px;color:#666;margin:2px 0}
 .bd-cam{background:#ffb703!important;border-color:#c98a00!important;font-weight:bold}
+.bd-stats{position:absolute;top:8px;left:8px;z-index:2;background:rgba(0,0,0,.62);color:#9ef7c8;font:12px/1.5 ui-monospace,monospace;padding:5px 9px;border-radius:8px;pointer-events:none;white-space:pre}
 .bendan-game{background:#fffdf8;border:2px solid #e9c46a;border-radius:16px;padding:10px 12px;color:#222;
   max-width:1200px;box-sizing:border-box;font-family:-apple-system,'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif}
 .bendan-game.bendan-popped,.bendan-game:fullscreen{max-width:none;border:none;border-radius:0;min-height:100vh;overflow:auto}
@@ -215,6 +234,8 @@ var tries = 0;
       else if (act === 'dock') dock(false);
       else if (act === 'fullscreen') fullscreen();
       else if (act === 'cam') { var b3 = root.__bendan3d; if (b3 && b3.cycleCam) b3.cycleCam(); }
+      else if (act === 'quality') { var b4 = root.__bendan3d; if (b4 && b4.cycleQuality) b4.cycleQuality(); }
+      else if (act === 'stats') { var b5 = root.__bendan3d; if (b5 && b5.toggleStats) b5.toggleStats(); }
       else if (act === 'mic') { if (micMode() !== 'whisper') mic(a); }
       else if (act === 'close-toast') { var t = q('.bd-toast'); if (t) t.style.display = 'none'; }
       return;
@@ -547,6 +568,16 @@ class WidgetGame:
         self.level_info = W.HTML()
         self.btn_start = W.Button(description="▶ 開始遊戲", tooltip="開始玩左上角選的這一關")
         self.btn_back = W.Button(description="⬅ 返回", tooltip="回主畫面（選關）", layout=W.Layout(width="86px"))
+        self.course = llm.on_course_server() and not llm.STATE.use_fake      # 課程伺服器：三個模型可以選
+        if self.course and llm.STATE.model not in llm.COURSE_MODELS:
+            llm.set_model("qwen2.5:7b")
+        opts = ([(f"🧠 {label}", key) for key, label in llm.COURSE_MODELS.items()] if self.course
+                else [(f"🧠 {llm.model_name()}", llm.STATE.model)])
+        self.model_pick = W.ToggleButtons(options=opts, value=llm.STATE.model if self.course else opts[0][1],
+                                          tooltips=[o[1] for o in opts], style={"button_width": "auto"},
+                                          disabled=not self.course)
+        self.btn_bench = W.ToggleButton(description="📊 模型跑分", tooltip="看三個模型的跑分")
+        self.bench_panel = W.HTML(layout=W.Layout(display="none"))
         self.tb_mode = W.ToggleButtons(options=[("賣蠢", "silly"), ("正經", "serious")], value=mode,
                                        style={"button_width": "56px"}, tooltips=["賣蠢模式", "正經模式（對照組）"])
         self.btn_reset = W.Button(description="↺ 重來", layout=W.Layout(width="74px"))
@@ -569,6 +600,8 @@ class WidgetGame:
         self.btn_coax.on_click(self._on_coax)
         self.dd_level.observe(self._on_level, names="value")
         self.btn_start.on_click(self._on_start)
+        self.model_pick.observe(self._on_model, names="value")
+        self.btn_bench.observe(self._on_bench, names="value")
         self.btn_back.on_click(self._on_back)
         self.tb_mode.observe(self._on_mode, names="value")
         self.btn_reset.on_click(lambda _: self._reset(self.session.game.level_id))
@@ -582,18 +615,21 @@ class WidgetGame:
         right = W.VBox([self.side])
         main = W.HBox([left, right])
         topbar = W.HBox([self.btn_back, self.head])
-        self.title_screen = W.Box([self.cover, self.dd_level, self.level_info, self.btn_start])
+        self.title_screen = W.Box([self.cover, self.dd_level, self.level_info, self.btn_start, self.model_pick,
+                                   self.btn_bench, self.bench_panel])
         self.game_screen = W.VBox([topbar, controls, main, self.extra])
         for w, cls in ((controls, "bendan-controls"), (inputrow, "bendan-inputrow"), (left, "bendan-left"),
                        (right, "bendan-right"), (main, "bendan-main"), (topbar, "bd-topbar"),
                        (self.title_screen, "bd-titlescreen"), (self.cover, "bd-coverbox"), (self.dd_level, "bd-levelpick"),
-                       (self.level_info, "bd-levelinfo"), (self.btn_start, "bd-start"), (self.btn_back, "bd-back")):
+                       (self.level_info, "bd-levelinfo"), (self.btn_start, "bd-start"), (self.btn_back, "bd-back"),
+                       (self.model_pick, "bd-modelpick"), (self.btn_bench, "bd-benchbtn"),
+                       (self.bench_panel, "bd-benchpanel")):
             w.add_class(cls)
         self.box = W.VBox([self.js, self.title_screen, self.game_screen, self.audio_in, self.assets3d, self.botw])
         self.box.add_class("bendan-game")
         self._controls = [self.cmd, self.btn_send, self.btn_stop, self.btn_home, self.btn_coax, self.dd_level,
                           self.tb_mode, self.tb_tts, self.btn_reset, self.btn_info, self.btn_quit, self.btn_start,
-                          self.btn_back]
+                          self.btn_back, self.model_pick, self.btn_bench]
         self._show_title(True)
         self.alive = threading.Event()
         self.alive.set()
@@ -631,10 +667,13 @@ class WidgetGame:
         closer = CLOSE_POPUP if self.closed else ""
         return ("<div class='bd-head'><div><span class='bd-title'>🧹 笨笨掃地機</span>　"
                 f"<span style='font-size:17px;font-weight:bold;color:#7a4b00'>{html.escape(level_title(g.level_id))}</span> "
-                f"{best}</div><div>"
+                f"{best} <span style='font-size:13px;color:#555'>🧠 {html.escape(llm.COURSE_MODELS.get(llm.STATE.model, llm.model_name()))}</span>"
+                f"</div><div>"
                 "<button class='bd-btn bd-hide-popped' data-act='popout' title='開一個獨立的遊戲視窗'>🪟 彈出視窗</button>"
                 "<button class='bd-btn bd-only-popped' data-act='dock'>⤓ 拉回 Notebook</button>"
                 "<button class='bd-btn' data-act='fullscreen'>⛶ 全螢幕</button>"
+                "<button class='bd-btn' data-act='quality' title='畫質：低（不要陰影、最省）→ 中（預設）→ 高（最漂亮）'>⚙️ 畫質</button>"
+                "<button class='bd-btn' data-act='stats' title='顯示 FPS、每張畫面的繪圖次數'>📈 效能</button>"
                 "<button class='bd-btn bd-cam' data-act='cam' title='按一下換下一個視角：跟隨 → 笨笨視角 → 俯瞰 → 監視器'>"
                 "🎥 換視角</button>"
                 f"</div></div>{closer}")
@@ -759,8 +798,22 @@ class WidgetGame:
         else:
             best = self.progress.stars(lid) if self.progress.level(lid).get("clears") else 0
             txt = (f"<b>{html.escape(level_title(lid))}</b> {stars_text(best) if best else ''}<br>"
-                   f"{html.escape(cfg.get('new') or cfg.get('intro', ''))}")
+                   f"{html.escape(cfg.get('new') or cfg.get('intro', ''))}<br>"
+                   f"<span style='color:#7a4b00'>🧠 大腦：{html.escape(llm.COURSE_MODELS.get(llm.STATE.model, llm.model_name()))}</span>")
         self.level_info.value = f"<div class='bd-li'>{txt}</div>"
+
+    def _on_model(self, change):
+        """主畫面選模型：之後每一句都交給這個模型（課程伺服器的三個模型）。"""
+        if self.course and change["new"] in llm.COURSE_MODELS:
+            llm.set_model(change["new"])
+        self._level_info()
+        self.dirty = True
+
+    def _on_bench(self, change):
+        from ..evaluation.benchmark import bench_html
+        if change["new"]:
+            self.bench_panel.value = bench_html()
+        self.bench_panel.layout.display = "block" if change["new"] else "none"
 
     def _show_title(self, on):
         self.on_title = on
