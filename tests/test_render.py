@@ -133,6 +133,7 @@ def test_widget_title_screen_start_and_back(progress):
         ui._on_start(None)
         assert not ui.on_title and ui.session.game.level_id == 2 and ui.game_screen.layout.display == "flex"
         assert "data-act='cam'" in ui._head_html()                           # 右上：換視角
+        assert "data-act='quality'" in ui._head_html() and "data-act='stats'" in ui._head_html()   # 3D 畫質／效能面板
         ui._take_input("/level 5")
         assert ui.session.game.level_id == 2 and "返回" in ui.say            # 遊戲中打指令也不能換關
         ui._on_back(None)

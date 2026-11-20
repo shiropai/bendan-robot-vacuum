@@ -135,14 +135,23 @@
   var REAL_H = { sofa: 0.85, tv: 0.5, bookcase: 1.8, armchair: 0.85, plant: 1.1, lamp: 1.6, speaker: 1.0, bed: 0.55, wardrobe: 2.0,
                  nightstand: 0.55, fridge: 1.8, stove: 0.9, sink: 0.9, counter: 0.9, counter2: 0.9, desk: 0.75, shelf: 1.9,
                  bookcase2: 1.8, toilet: 0.75, basin: 0.85, washer: 0.85, bathcab: 0.8, cabinet: 0.9 };
+  // 畫質（研究報告的 3D 效能建議）：像素比上限、陰影貼圖 ≤ 1024（中）、動態燈光數、粒子上限、家具要不要投影
+  var QUALITY = {
+    low: { label: '低', pr: 1, shadow: 0, lights: 0, parts: 160, furnShadow: false },
+    mid: { label: '中', pr: 1.5, shadow: 1024, lights: 3, parts: 280, furnShadow: false },
+    high: { label: '高', pr: 2, shadow: 2048, lights: 6, parts: 420, furnShadow: true }
+  };
+  var QORDER = ['low', 'mid', 'high'];
+  function savedQuality() { try { var q = localStorage.getItem('bendan-quality'); return QUALITY[q] ? q : 'mid'; } catch (e) { return 'mid'; } }
   var FAIL_TXT = { exploded: '💥 笨笨爆炸了', owner_faint: '🤯 主人氣昏了', out_of_battery: '🪫 沒電了', time_up: '⏱️ 時間到' };
 
   async function make3d(L, host, assets) {
     var THREE = L.THREE;
     host.innerHTML = '';
-    var renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    var quality = savedQuality(), Q = QUALITY[quality];       // 課程 JupyterHub／學生筆電預設「中」
+    var renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(Q.pr, window.devicePixelRatio || 1));
+    renderer.shadowMap.enabled = Q.shadow > 0; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     host.appendChild(renderer.domElement);
@@ -162,7 +171,7 @@
     var camera = new THREE.PerspectiveCamera(62, 1.6, 0.03, 140);
     var hemi = new THREE.HemisphereLight(0xfff6ea, 0x8c7a66, 0.55); scene.add(hemi);
     var sun = new THREE.DirectionalLight(0xfff0d8, 1.3);
-    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
+    sun.castShadow = true; sun.shadow.mapSize.set(Q.shadow || 512, Q.shadow || 512); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
     scene.add(sun, sun.target);
     var ground = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), new THREE.MeshStandardMaterial({ color: '#b9c7a3', roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.03; ground.receiveShadow = true; scene.add(ground);
@@ -499,11 +508,29 @@
     var dirtMat = M('#6b4f35', 0.95), crumbGeo = new THREE.DodecahedronGeometry(0.035, 0);
     var smudge = canvasTex(function (g, S) { var gr = g.createRadialGradient(S / 2, S / 2, 4, S / 2, S / 2, S / 2); gr.addColorStop(0, 'rgba(90,65,40,.55)'); gr.addColorStop(1, 'rgba(90,65,40,0)'); g.fillStyle = gr; g.fillRect(0, 0, S, S); }, 128);
     var smudgeMat = new THREE.MeshStandardMaterial({ map: smudge, transparent: true, depthWrite: false });
+    // 合併幾何：把好幾個小零件烤成一個 BufferGeometry（少很多 draw call）
+    function mergeParts(list) {          // list: [[geometry, Object3D 的位置／旋轉／縮放], ...]
+      var pos = [], nor = [], n = 0;
+      list.forEach(function (it) {
+        it[1].updateMatrix(); var g = (it[0].index ? it[0].toNonIndexed() : it[0].clone()); g.applyMatrix4(it[1].matrix);
+        pos.push(g.attributes.position.array); nor.push(g.attributes.normal.array); n += g.attributes.position.array.length; g.dispose();
+      });
+      var P = new Float32Array(n), N = new Float32Array(n), o = 0;
+      pos.forEach(function (a, i) { P.set(a, o); N.set(nor[i], o); o += a.length; });
+      var out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.BufferAttribute(P, 3)); out.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+      out.computeBoundingSphere(); return out;
+    }
+    var smudgeGeo = new THREE.PlaneGeometry(0.75, 0.75), crumbCache = {};
     function dirt(seed) {
-      var r = rnd(seed + 1), g = new THREE.Group();
-      var sm = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.75), smudgeMat);
-      sm.rotation.x = -Math.PI / 2; sm.position.y = 0.004; g.add(sm);
-      for (var i = 0; i < 9; i++) { var c = mesh(crumbGeo, dirtMat); c.scale.setScalar(0.5 + r() * 0.9); c.position.set((r() - 0.5) * 0.45, 0.015, (r() - 0.5) * 0.45); c.rotation.set(r() * 3, r() * 3, 0); g.add(c); }
+      var key = seed % 6, g = new THREE.Group();
+      if (!crumbCache[key]) {
+        var r = rnd(key + 1), list = [];
+        for (var i = 0; i < 9; i++) { var t = new THREE.Object3D(); t.scale.setScalar(0.5 + r() * 0.9); t.position.set((r() - 0.5) * 0.45, 0.015, (r() - 0.5) * 0.45); t.rotation.set(r() * 3, r() * 3, 0); list.push([crumbGeo, t]); }
+        crumbCache[key] = mergeParts(list);
+      }
+      var sm = new THREE.Mesh(smudgeGeo, smudgeMat); sm.rotation.x = -Math.PI / 2; sm.position.y = 0.004; g.add(sm);
+      var c = new THREE.Mesh(crumbCache[key], dirtMat); c.receiveShadow = true; c.rotation.y = (seed % 7) * 0.9; g.add(c);
+      g.userData.shared = true;          // 幾何是共用的：換關時不要 dispose
       return g;
     }
     function dock() {
@@ -544,6 +571,8 @@
     face.rotation.x = -Math.PI / 2; face.position.set(0, 0.1635, -0.005); body.add(face);
     var faceKey = '';
     var fireLight = new THREE.PointLight(0xff7a2a, 0, 2.5, 2); fireLight.position.y = 0.35; robot.add(fireLight);   // 第 4 級起火的火光
+    var robotBlob = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.95), contactMat);   // 畫質「低」關掉陰影時的假陰影
+    robotBlob.rotation.x = -Math.PI / 2; robotBlob.position.y = 0.004; robotBlob.visible = !renderer.shadowMap.enabled; robot.add(robotBlob);
     function drawFace(key) {
       if (key === faceKey) return; faceKey = key;
       var g = faceCanvas.getContext('2d'), W = 128, H = 64, col = key === 'hurt' || key === 'dead' ? '#ff6b6b' : '#5ef2ff';
@@ -608,7 +637,7 @@
       var s = new THREE.Sprite(m); s.position.copy(o.pos); s.scale.setScalar(o.size0 || 0.2);
       s.userData = { v: o.vel || new THREE.Vector3(), life: 0, max: o.life || 1.5, s0: o.size0 || 0.2, s1: o.size1 || 0.6, a: o.alpha || 0.6, g: o.grav || 0, drag: o.drag || 0 };
       scene.add(s); parts.push(s);
-      if (parts.length > 420) { var old = parts.shift(); scene.remove(old); old.material.dispose(); }
+      if (parts.length > Q.parts) { var old = parts.shift(); scene.remove(old); old.material.dispose(); }
     }
     function V(x, y, z) { return new THREE.Vector3(x, y, z); }
     function rr(a) { return (Math.random() - 0.5) * 2 * a; }
@@ -642,9 +671,16 @@
     function later(sec, fn) { addTween(sec, function () {}, fn); }
     function shakeCam(amp, dur) { if (amp >= shake.amp * Math.max(0, 1 - (performance.now() - shake.t0) / (shake.dur * 1000))) shake = { amp: amp, t0: performance.now(), dur: dur }; }
 
+    function disposeTree(o) {          // 換關：把舊的幾何、材質從 GPU 釋放（貼圖是共用的，不釋放）
+      o.traverse(function (m) {
+        if (m.userData && m.userData.shared) return;
+        if (m.geometry && m.geometry !== crumbGeo && m.geometry !== smudgeGeo && !(m.parent && m.parent.userData.shared)) m.geometry.dispose();
+        if (m.material) (Array.isArray(m.material) ? m.material : [m.material]).forEach(function (mt) { mt.dispose(); });
+      });
+    }
     function buildStatic(st) {
-      [staticGroup, decor, ceilGroup].forEach(function (g) { while (g.children.length) g.remove(g.children[0]); });
-      wallGroup.children.slice().forEach(function (c) { if (c !== decor) wallGroup.remove(c); });
+      [staticGroup, decor, ceilGroup].forEach(function (g) { while (g.children.length) { var c0 = g.children[0]; g.remove(c0); disposeTree(c0); } });
+      wallGroup.children.slice().forEach(function (c) { if (c !== decor) { wallGroup.remove(c); disposeTree(c); } });
       fogBoxes = {}; wallMeshes = []; furnGroups = []; lamps = []; fans = []; roomBox = {}; roomAt = {};
       house = { w: st.w, h: st.h };
       var tile = {}, wall = {};
@@ -743,7 +779,7 @@
         }
         spots.forEach(function (s, k) {
           var withFan = name === '客廳' && k === 0;
-          var lamp = lampAt(s[0], s[1], withFan, nLight < 9); if (lamp.userData.light) nLight++;
+          var lamp = lampAt(s[0], s[1], withFan, nLight < Q.lights); if (lamp.userData.light) nLight++;
           ceilGroup.add(lamp); lamps.push(lamp);
         });
         // 每個房間中間一張地毯
@@ -754,7 +790,11 @@
         }
       });
       // 家具（真的障礙物）
-      (st.furniture || []).forEach(function (f) { var g = placeFurniture(f); if (g) { staticGroup.add(g); furnGroups.push(g); } });
+      (st.furniture || []).forEach(function (f) {
+        var g = placeFurniture(f); if (!g) return;
+        g.traverse(function (o) { if (o.isMesh) o.castShadow = Q.furnShadow; });       // 中／低畫質：家具不投影（地上已經有接地陰影）
+        staticGroup.add(g); furnGroups.push(g);
+      });
       if (st.home) { var dk = dock(); dk.position.set(st.home[0], 0, st.home[1]); staticGroup.add(dk); }
       garden(st, r);
       // 停電：看不到的地方蓋黑色方塊
@@ -905,6 +945,7 @@
     }
 
     function update(st) {
+      lastSt = st; lastActive = performance.now();
       var key = [st.level, st.w, st.h, st.walls.length, st.tiles.length, (st.furniture || []).length].join('|');
       if (key !== staticKey) {
         staticKey = key; buildStatic(st);
@@ -1119,7 +1160,7 @@
       setCam(CAMS[(i + 1) % CAMS.length][0]);
     });
     function setCam(c) {
-      cam = c;
+      cam = c; lastActive = performance.now();
       var btn = bar.querySelector('[data-camnext]');
       CAMS.forEach(function (k) { if (k[0] === c) btn.textContent = k[1] + ' ▸'; });
       host.classList.toggle('bd-cctv', c === 'cctv');
@@ -1130,21 +1171,23 @@
     cvs.addEventListener('pointerdown', function (e) { drag = e.clientX; });
     cvs.addEventListener('pointermove', function (e) {
       if (cam !== 'top' || drag === null || Math.abs(e.clientX - drag) < 3) return;   // 只有俯瞰時才能拖曳；點畫面不會換視角
-      yaw -= (e.clientX - drag) * 0.01; drag = e.clientX;
+      yaw -= (e.clientX - drag) * 0.01; drag = e.clientX; lastActive = performance.now();
     });
     cvs.addEventListener('pointerup', function () { drag = null; });
     cvs.addEventListener('pointerleave', function () { drag = null; });
-    cvs.addEventListener('wheel', function (e) { if (cam !== 'top') return; e.preventDefault(); dist = Math.max(4, Math.min(40, dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+    cvs.addEventListener('wheel', function (e) { if (cam !== 'top') return; e.preventDefault(); dist = Math.max(4, Math.min(40, dist * (1 + e.deltaY * 0.001))); lastActive = performance.now(); }, { passive: false });
 
-    var clock = new THREE.Clock(), fwd = new THREE.Vector3(), tmp = new THREE.Vector3(), pivot = new THREE.Vector3(), lastSmoke = 0, lastSpark = 0, lastFlame = 0, lastCrack = 0, lastAlarm = 0;
+    var clock = new THREE.Clock(), fwd = new THREE.Vector3(), tmp = new THREE.Vector3(), pivot = new THREE.Vector3(), lastSmoke = 0, lastSpark = 0, lastFlame = 0, lastCrack = 0, lastAlarm = 0,
+        lastActive = 0, lastRender = 0, frames = 0, statsAt = 0, lastSt = null, wantPos = new THREE.Vector3();
     function ease(k) { return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; }
     function loop() {
       var win = cvs.ownerDocument.defaultView || window;     // 彈出視窗後要用新視窗的 rAF
       win.requestAnimationFrame(loop);
       var dt = Math.min(clock.getDelta(), 0.05), now = performance.now(), T = clock.elapsedTime;
-      if (!cvs.isConnected || cvs.offsetParent === null) return;
+      if (!cvs.isConnected || cvs.offsetParent === null) return;          // 畫面被藏起來（主畫面、別的分頁）：完全不畫
       var W = host.clientWidth || 640, H = Math.round(W * 0.6);
-      if (cvs.width !== Math.round(W * renderer.getPixelRatio())) { renderer.setSize(W, H); camera.aspect = W / H; camera.updateProjectionMatrix(); }
+      if (cvs.width !== Math.round(W * renderer.getPixelRatio())) { renderer.setSize(W, H); camera.aspect = W / H; camera.updateProjectionMatrix(); lastActive = now; }
+      if (now - lastActive > 1500 && now - lastRender < 110) return;        // 沒東西在動：降到每秒約 9 張（省電、不燙）
       // 計時動畫
       for (var i = tweens.length - 1; i >= 0; i--) {
         var tw = tweens[i], k = Math.min(1, (now - tw.t0) / tw.dur); tw.fn(k);
@@ -1303,11 +1346,44 @@
         });
       });
       renderer.render(scene, camera);
+      lastRender = now; frames++;
+      var moving = motion.moving() || driving || parts.length || tweens.length || override || spin.dur || thinking || (dmg && !wrecked) ||
+        debris.some(function (d) { return !d.rest; }) || camPos.distanceToSquared(wantPos) > 0.0004 ||
+        ['cat', 'dog', 'roach'].some(function (k) { return pets[k].some(function (pt) { return pt.target && pt.g.position.distanceToSquared(pt.target) > 0.001; }); });
+      if (moving) lastActive = now;
+      if (now - statsAt > 500) {
+        var fps = frames * 1000 / (now - statsAt); frames = 0; statsAt = now;
+        if (stats.style.display !== 'none') {
+          var inf = renderer.info;
+          stats.textContent = 'FPS ' + fps.toFixed(0) + (now - lastActive > 1500 ? '（閒置）' : '') + '\n繪圖 ' + inf.render.calls + ' 次／' +
+            Math.round(inf.render.triangles / 1000) + 'k 三角形\n幾何 ' + inf.memory.geometries + '／貼圖 ' + inf.memory.textures + '\n畫質：' + Q.label;
+        }
+      }
     }
+    // 畫質切換：像素比、陰影、燈光、家具投影；燈光和家具要重建靜態場景
+    function setQuality(q) {
+      if (!QUALITY[q]) return quality;
+      quality = q; Q = QUALITY[q];
+      try { localStorage.setItem('bendan-quality', q); } catch (e) {}
+      renderer.setPixelRatio(Math.min(Q.pr, window.devicePixelRatio || 1));
+      renderer.shadowMap.enabled = Q.shadow > 0; robotBlob.visible = !renderer.shadowMap.enabled;
+      if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+      sun.shadow.mapSize.set(Q.shadow || 512, Q.shadow || 512);
+      scene.traverse(function (o) { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(function (m) { m.needsUpdate = true; }); });
+      if (lastSt) { staticKey = ''; update(lastSt); }
+      hint.textContent = '⚙️ 畫質：' + Q.label + '（低＝不要陰影、最省；中＝預設；高＝最漂亮）';
+      lastActive = performance.now();
+      return quality;
+    }
+    var stats = document.createElement('div'); stats.className = 'bd-stats'; stats.style.display = 'none'; host.appendChild(stats);
     loop();
     // 除錯用：在瀏覽器 console 可以看場景狀況（root.__bendan3d.info()）
     root.__bendan3d = { scene: scene, camera: camera, setCam: setCam,
-      cycleCam: function () { var i = 0; CAMS.forEach(function (c, k) { if (c[0] === cam) i = k; }); setCam(CAMS[(i + 1) % CAMS.length][0]); return cam; }, info: function () {
+      cycleCam: function () { var i = 0; CAMS.forEach(function (c, k) { if (c[0] === cam) i = k; }); setCam(CAMS[(i + 1) % CAMS.length][0]); return cam; },
+      setQuality: setQuality, cycleQuality: function () { return setQuality(QORDER[(QORDER.indexOf(quality) + 1) % QORDER.length]); },
+      toggleStats: function () { stats.style.display = stats.style.display === 'none' ? 'block' : 'none'; lastActive = performance.now(); return stats.style.display !== 'none'; },
+      perf: function () { var i = renderer.info; return { quality: quality, calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, idle: performance.now() - lastActive > 1500 }; },
+      info: function () {
       var n = 0; scene.traverse(function (o) { if (o.isMesh) n++; });
       return { cam: cam, cut: cut, meshes: n, furniture: furnGroups.length, lamps: lamps.length, walls: wallMeshes.length, parts: parts.length,
                robot: robot.position.toArray(), bump: bump.off.toArray(), dmg: dmg, wrecked: wrecked, cats: pets.cat.length, roaches: pets.roach.length, lastFx: lastFx };
