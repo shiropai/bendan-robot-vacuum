@@ -62,6 +62,9 @@ def meters_html(session):
     if session.gameplay:
         m, bp = session.mood, session.bp
         rows.append(_bar("💗 心情", m.value, MOOD_COLOR[m.name], f"{m.emoji} {m.name}（{m.value:.0f}）"))
+        if turn := m.turn_text():      # 語氣和事件分開顯示：罵它 -15，但同一句吸到灰塵又 +9，不然看起來像「罵了反而變開心」
+            rows.append(f"<div class='bd-moodturn' style='font-size:11px;color:#888;margin:-2px 0 2px 70px'>"
+                        f"{html.escape(turn)}</div>")
         rows.append(_bar("🩸 主人血壓", bp.value, _bp_color(bp.value), f"{bp.mmhg} mmHg {bp.label}"))
     return "".join(rows)
 

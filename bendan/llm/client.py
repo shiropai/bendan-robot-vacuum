@@ -26,6 +26,7 @@ class LLMState:
         self.use_fake = True
         self.json_mode = False          # True = 要求 vLLM 強制輸出 JSON（response_format）
         self.json_supported = True
+        self.seed_supported = True       # 送 seed 讓抽樣可重現（vLLM、OpenAI、Ollama 都吃）
         self.available_models = []
         self.fake = FakeLLM()
         self.connected = False
@@ -154,8 +155,8 @@ def model_name():
     return "FakeLLM(離線)" if STATE.use_fake else STATE.model
 
 
-def chat(messages, temperature=0.5, max_tokens=300):
-    """送出 messages，回傳模型的文字回覆。"""
+def chat(messages, temperature=0.5, max_tokens=300, seed=None):
+    """送出 messages，回傳模型的文字回覆。seed：固定抽樣（同樣的 messages＋seed → 同樣的回覆），評估用。"""
     _ensure()
     if STATE.use_fake:
         return STATE.fake.chat(messages, temperature)
@@ -164,17 +165,32 @@ def chat(messages, temperature=0.5, max_tokens=300):
         # chat_template_kwargs 會被代理丟掉，只有在訊息最後加 /no_think 有效（會留一個空的 <think></think>，下面剝掉）。
         messages = messages[:-1] + [dict(messages[-1], content=messages[-1]["content"] + " /no_think")]
     kwargs = dict(model=STATE.model, messages=messages, temperature=temperature, max_tokens=max_tokens, stream=False)
+    if seed is not None and STATE.seed_supported:
+        kwargs["seed"] = int(seed)
     if STATE.json_mode and STATE.json_supported:
         try:
-            resp = STATE.client.chat.completions.create(response_format={"type": "json_object"}, **kwargs)
+            resp = _create(response_format={"type": "json_object"}, **kwargs)
             return _clean(resp.choices[0].message.content)
         except Exception as exc:   # noqa: BLE001
             if getattr(exc, "status_code", None) not in (400, 422):
                 raise
             STATE.json_supported = False
             print("⚠️ 伺服器不支援 response_format，改回一般模式。")
-    resp = STATE.client.chat.completions.create(**kwargs)
+    resp = _create(**kwargs)
     return _clean(resp.choices[0].message.content)
+
+
+def _create(**kwargs):
+    """呼叫 API；伺服器不認得 seed 的話，拿掉 seed 再送一次（之後都不送）。"""
+    try:
+        return STATE.client.chat.completions.create(**kwargs)
+    except Exception as exc:   # noqa: BLE001
+        if ("seed" not in kwargs or getattr(exc, "status_code", None) not in (400, 422)
+                or "seed" not in str(exc).lower()):
+            raise
+        STATE.seed_supported = False
+        kwargs.pop("seed")
+        return STATE.client.chat.completions.create(**kwargs)
 
 
 def _clean(text):

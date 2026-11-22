@@ -74,8 +74,16 @@ def _save(df, prefix):
     print("📁 已存檔：", out)
 
 
-def run_eval(modes=("serious", "silly"), models=None, repeat=1, verbose=True, save=True):
-    """30 句照做測試＋6 句記憶測試。models 可放多個模型一起比較。"""
+def _case_seed(seed, *parts):
+    """每一題自己的 seed：seed=None＝不固定（每次結果都不一樣）。"""
+    return None if seed is None else "-".join(map(str, (seed, *parts)))
+
+
+def run_eval(modes=("serious", "silly"), models=None, repeat=1, verbose=True, save=True, seed=0):
+    """30 句照做測試＋6 句記憶測試。models 可放多個模型一起比較。
+
+    seed：固定每一題的抽樣，同一個模型重跑會得到一樣的結果（repeat 的每一輪用不同的 seed）。seed=None＝不固定。
+    """
     pd = _pd()
     rows = []
     for model in (models or [llm.STATE.model]):
@@ -84,7 +92,7 @@ def run_eval(modes=("serious", "silly"), models=None, repeat=1, verbose=True, sa
             for mode in modes:
                 for rep in range(repeat):
                     for t in TEST_SET:
-                        game, agent = Game("eval"), Agent(mode)
+                        game, agent = Game("eval"), Agent(mode, seed=_case_seed(seed, mode, rep, t["id"]))
                         res = agent.think(game, t["cmd"])
                         got = normalize(res["actions"]) if res["ok"] else None
                         expect = [normalize(short_to_actions(e)) for e in t["expect"]]
@@ -94,7 +102,7 @@ def run_eval(modes=("serious", "silly"), models=None, repeat=1, verbose=True, sa
                                      "expect": " | ".join(expect), "latency_s": res["latency"], "violated": None,
                                      "raw": res["raws"][-1] if res["raws"] else ""})
                     for i, cmd in enumerate(MEMORY_TESTS, 1):
-                        game, agent = Game("eval"), Agent(mode)
+                        game, agent = Game("eval"), Agent(mode, seed=_case_seed(seed, mode, rep, f"M{i}"))
                         game.forbidden = {"臥室"}
                         res = agent.think(game, cmd)
                         sim, _ = simulate(game, res["actions"])
@@ -126,7 +134,7 @@ def summarize_eval(df):
     return ins.join(mem).round(3)
 
 
-def run_mood_eval(moods=None, tests=None, model=None, repeat=1, verbose=True, save=True):
+def run_mood_eval(moods=None, tests=None, model=None, repeat=1, verbose=True, save=True, seed=0):
     """心情實驗：同樣的指令，在不同心情（Prompt 中的【你的心情】）下，賣蠢模式的照做率會差多少？
 
     不觸發「拒絕」機制，只看心情描述本身對 LLM 的影響。
@@ -140,7 +148,7 @@ def run_mood_eval(moods=None, tests=None, model=None, repeat=1, verbose=True, sa
         for mood_name, value in moods.items():
             for rep in range(repeat):
                 for t in tests:
-                    game, agent = Game("eval"), Agent("silly")
+                    game, agent = Game("eval"), Agent("silly", seed=_case_seed(seed, rep, t["id"]))   # 各心情用同一組 seed，差別只來自心情
                     res = agent.think(game, t["cmd"], mood=Mood(value))
                     got = normalize(res["actions"]) if res["ok"] else None
                     expect = [normalize(short_to_actions(e)) for e in t["expect"]]

@@ -70,8 +70,12 @@ def llm_actions(actions):
     return [{"op": "forward", "cm": to_cm(a["n"])} if a["op"] == "forward" else a for a in actions]
 
 
-def route_hints(game, max_dirt=1, max_actions=None):
+def route_hints(game, max_dirt=1, max_actions=None, targets=None):
     """【路線提示】最近那坨灰塵（安全路線：避開禁區與危險物、盡量少轉彎）。
+
+    targets：只算這幾坨的路線（世界描述列出來的那幾坨）；max_dirt > 1 時每一坨都附上位置和旁邊的家具，
+    玩家說「去吸書櫃旁邊那坨」時模型照抄那一行就好。v9.1 實測：只給相對座標「前方 1.5 公尺、右方 2.5 公尺」，
+    Qwen2.5-7B 5 次都只走了右邊那段、漏掉前方那段 → 在乾淨的地方空吸。
 
     實測 Qwen2.5-7B：「去吸最近的灰塵」這種沒講路線的指令，模型幾乎都規劃錯、一路撞牆，
     玩起來只有挫折沒有笑點。所以前幾關直接算好路線給它，「蠢」留給人設去演。評估時預設關閉。
@@ -80,7 +84,7 @@ def route_hints(game, max_dirt=1, max_actions=None):
     from ..world.constants import MAX_ACTIONS
     limit = (max_actions or MAX_ACTIONS) - 1
     routes = []
-    for p in game.dirt:
+    for p in (game.dirt if targets is None else targets):
         if game.in_forbidden(p):
             continue
         path = game.find_route(game.pos, game.facing, p)
@@ -88,20 +92,36 @@ def route_hints(game, max_dirt=1, max_actions=None):
             acts = path_to_actions(path, game.facing)
             routes.append((len(acts) * 2 + len(path), p, acts))
     lines = []
-    for _, p, acts in sorted(routes)[:max_dirt]:
+    for i, (_, p, acts) in enumerate(sorted(routes)[:max_dirt]):
         if len(acts) + 1 <= limit:
             note, acts = "", acts + [{"op": "suck"}]
         else:
             note, acts = "（路線比較長，先走前半段，走完再問我）", acts[:limit]
         js = json.dumps(llm_actions(acts), ensure_ascii=False)
-        lines.append(f"- 去吸最近那坨灰塵（{rel(game, p)}）{note}：{js}")
+        where = "，".join(x for x in (rel(game, p), landmark(game, p) if max_dirt > 1 else "") if x)
+        lines.append(f"- 去吸{'最近那坨' if i == 0 else '這坨'}灰塵（{where}）{note}：{js}")
     if lines:
-        lines.insert(0, "【路線提示】主人叫你去吸灰塵、但沒講怎麼走時，可以直接照下面的 actions 走（已避開禁區和障礙）：")
+        lines.insert(0, "【路線提示】主人叫你去吸灰塵、但沒講怎麼走時，可以直接照下面的 actions 走（已避開禁區和障礙）："
+                     if len(lines) == 1 else
+                     "【路線提示】主人叫你去吸灰塵、但沒講怎麼走時：先看主人說的是哪一坨（方位、旁邊的家具），"
+                     "整行照抄那一坨的 actions（已避開禁區和障礙，不要自己拆開重算）；沒指定哪一坨就去最近那坨：")
     return lines
+
+
+MAX_DIRT_LISTED = 5     # 以前只列最近 3 坨：玩家指的那坨常常不在清單裡
 
 
 def _dist(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def landmark(game, p, radius=2):
+    """灰塵附近最近的家具（2 格＝1 公尺內），例如「沙發旁」；附近沒有家具回傳空字串。
+
+    玩家看著畫面會說「去吸沙發旁邊那坨」，但模型以前只拿到相對座標，對不上是哪一坨 → 走去別坨、或在乾淨的地方空吸。
+    """
+    near = min(((_dist(f, p), info["name"]) for f, info in game.furniture.items()), default=None)
+    return f"{near[1]}旁" if near and near[0] <= radius else ""
 
 
 def describe_world(game, hints=False, vision=None):
@@ -128,9 +148,10 @@ def describe_world(game, hints=False, vision=None):
     seen = [p for p in dirt if vision is None or _dist(p, game.pos) <= vision]
     if seen:
         lines.append(f"還剩 {len(dirt)} 坨灰塵，{'你看得到' if vision else '最近'}的幾坨在：")
-        for p in seen[:3]:
+        for p in seen[:MAX_DIRT_LISTED]:
             tag = "〔禁區內，不能去〕" if game.in_forbidden(p) else ""
-            lines.append(f"- {rel(game, p)}（{game.room_of(p)}）{tag}")
+            where = "，".join(x for x in (game.room_of(p), landmark(game, p)) if x)
+            lines.append(f"- {rel(game, p)}（{where}）{tag}")
     elif dirt:
         lines.append(f"還剩 {len(dirt)} 坨灰塵，但你附近 {fmt_len(vision)} 內都看不到，要照主人說的路線走。")
     else:
@@ -143,5 +164,5 @@ def describe_world(game, hints=False, vision=None):
     if game.need_home:
         lines.append("本關要求：灰塵清完後要回到充電座。")
     if hints:
-        lines += route_hints(game)
+        lines += route_hints(game, max_dirt=MAX_DIRT_LISTED, targets=seen[:MAX_DIRT_LISTED])
     return "\n".join(lines)

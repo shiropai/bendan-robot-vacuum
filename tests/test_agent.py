@@ -1,3 +1,5 @@
+import pytest
+
 from bendan.agent import (Agent, describe_world, extract_json, parse_reply, update_rules_from_text,
                           validate_output)
 from bendan.gameplay import Mood
@@ -21,6 +23,21 @@ def test_validate_coerces_numbers_and_ignores_bad_emotion():
     plan, _ = validate_output({"actions": [], "say": "好", "emotion": "生氣"})
     assert plan["emotion"] == "生氣"
 
+
+
+@pytest.mark.parametrize("bad", [{"n": "²"}, {"n": "①"}, {"n": True}, {"n": 2.5}, {"cm": "inf"}, {"cm": "1e400"},
+                                 {"m": "nan"}, {"cm": True}, {"cm": 1e300}])
+def test_validate_rejects_odd_numbers_without_crashing(bad):
+    """「²」isdigit() 是 True 但 int() 轉不了；inf 會讓四捨五入丟 OverflowError。都應該回報格式錯，而不是整個掛掉。"""
+    plan, errs = validate_output({"actions": [dict(op="forward", **bad)], "say": "好"})
+    assert plan is None and errs
+    plan, errs = validate_output({"actions": [{"op": "turn_left", "n": "²"}], "say": "好"})
+    assert plan is None and errs
+
+
+def test_validate_accepts_fullwidth_digits_and_meter_strings():
+    plan, errs = validate_output({"actions": [{"op": "forward", "n": "２"}, {"op": "forward", "m": "1"}], "say": "好"})
+    assert errs == [] and plan["actions"] == [{"op": "forward", "n": 2}, {"op": "forward", "n": 2}]
 
 def test_parse_reply_reports_broken_json():
     plan, errs = parse_reply('{"actions": [{"op": "forward", "n": 3},], "say": "多一個逗號"}')
@@ -65,6 +82,21 @@ def test_mood_changes_silliness_and_prompt():
     assert "【你的心情】鬧彆扭" in msgs[1]["content"]
     assert "【你的心情】" not in Agent("serious").build_messages(g, "前進", mood=Mood(10))[1]["content"]
 
+
+
+def test_insult_gets_a_comeback_even_in_normal_mood():
+    """罵一次「笨蛋」心情 65 → 50 還是「普通」：以前提示詞完全沒提，模型就沒反應。現在這一句一定要回嘴，回饋回合不用再回一次。"""
+    from bendan.gameplay import analyze_tone
+    from bendan.gameplay.mood import INSULT_REACTION
+    agent, g, m = Agent("silly"), Game(1), Mood(65)
+    m.apply_tone(analyze_tone("笨蛋，往前走"))
+    assert m.name == "普通"
+    assert INSULT_REACTION in agent.build_messages(g, "笨蛋，往前走", mood=m)[1]["content"]
+    feedback = agent.build_messages(g, "笨蛋，往前走", feedback_events=[{"type": "moved", "msg": "走了"}], mood=m)
+    assert INSULT_REACTION not in feedback[1]["content"]
+    m.apply_tone(analyze_tone("往前走"))          # 下一句沒罵：不能還留著「主人剛剛：罵人」
+    text = agent.build_messages(g, "往前走", mood=m)[1]["content"]
+    assert INSULT_REACTION not in text and "罵人" not in text
 
 def test_route_hints_reach_nearest_dirt_without_violations():
     import json
@@ -128,3 +160,33 @@ def test_say_is_converted_to_traditional():
     assert plan["say"] == "哎呀，主人語氣這麼凶幹嘛？我覺得這邊比較髒"
     plan, _ = validate_output({"actions": [], "say": "干擾一公里"})      # 有歧義的字不轉
     assert plan["say"] == "干擾一公里"
+
+
+def test_dirt_list_names_nearby_furniture():
+    """玩家說「去吸書櫃旁邊那坨」：清單要多列幾坨，還要寫附近的家具，模型才對得上是哪一坨。"""
+    from bendan.agent.perception import MAX_DIRT_LISTED, landmark
+    g = Game(5)
+    text = describe_world(g)
+    listed = text.split("最近的幾坨在：\n")[1].split("\n充電座在")[0].splitlines()
+    assert len(listed) == min(MAX_DIRT_LISTED, len(g.dirt)) > 3
+    assert any("旁）" in line for line in listed)
+    far = next(p for p in g.floor_tiles() if all(abs(p[0] - f[0]) + abs(p[1] - f[1]) > 2 for f in g.furniture))
+    assert landmark(g, far) == ""
+
+
+def test_route_hints_cover_every_listed_pile_with_landmarks():
+    """「去吸書櫃旁邊那坨」：模型拆不好「前方 1.5 公尺、右方 2.5 公尺」這種兩段座標，所以每一坨都給算好的路線。"""
+    import json
+
+    from bendan.world import run_to_end
+    g = Game(5)
+    lines = [ln for ln in describe_world(g, hints=True).split("【路線提示】")[1].splitlines() if ln.startswith("- 去吸")]
+    assert len(lines) == 5 and "最近那坨" in lines[0]
+    shelf = next(ln for ln in lines if "書櫃旁" in ln)
+    acts = json.loads(shelf.split("）：", 1)[1])
+    before = set(g.dirt)
+    g.set_plan(acts)
+    run_to_end(g)
+    (got,) = before - set(g.dirt)
+    from bendan.agent.perception import landmark
+    assert landmark(Game(5), got) == "書櫃旁" and g.violations == 0
