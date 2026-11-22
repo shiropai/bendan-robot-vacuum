@@ -30,6 +30,8 @@ class Agent:
         self.last_flavor = None
         self.memory = Memory()
         self.rng = random.Random(seed)
+        # 有給 seed 才固定模型的抽樣（評估要可重現；平常玩 seed=None，每次都不一樣）。另開一個 rng，不影響上面那個的序列
+        self.llm_rng = None if seed is None else random.Random(f"llm-{seed}")
 
     def effective_silliness(self, game, mood=None):
         base = game.cfg.get("silliness", 1) if self.silliness is None else self.silliness
@@ -47,7 +49,8 @@ class Agent:
         hints = self.route_hints and game.cfg.get("route_hints", True)   # 進階關卡：導航壞了，要玩家指路
         world = describe_world(game, hints=hints, vision=game.cfg.get("vision"))
         mem = self.memory.to_text(game)
-        mood_txt = f"\n\n【你的心情】{mood.prompt_text()}" if (mood is not None and self.mode == "silly") else ""
+        mood_txt = (f"\n\n【你的心情】{mood.prompt_text(react=feedback_events is None)}"
+                    if (mood is not None and self.mode == "silly") else "")
         self.last_flavor = None
         if self.flavor and self.mode == "silly":
             ftxt, self.last_flavor = pick_flavor(game, self.rng, mood)
@@ -70,9 +73,11 @@ class Agent:
                   "actions": [], "say": "", "emotion": None, "refused": False, "flavor": self.last_flavor,
                   "temperature": temperature}
         t0 = time.perf_counter()
+        call_seed = self.llm_rng.randrange(2 ** 31) if self.llm_rng else None
         for attempt in range(2):                # 解析失敗自動重試一次
             try:
-                raw = llm.chat(messages, temperature=temperature)
+                raw = llm.chat(messages, temperature=temperature,
+                               seed=None if call_seed is None else call_seed + attempt)
             except Exception as exc:            # noqa: BLE001 — API 出錯就發呆，不讓遊戲當掉
                 result["errors"].append(f"API 錯誤：{type(exc).__name__}: {str(exc)[:100]}")
                 break

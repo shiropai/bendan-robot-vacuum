@@ -127,3 +127,28 @@ def test_forbid_rule_accepts_both_spellings(session_factory):
     s.game.forbidden.clear()
     s.preprocess("不準進臥室")
     assert "臥室" in s.game.forbidden
+
+
+def test_auto_voice_is_silent_when_whisper_is_missing(monkeypatch, capsys, progress):
+    """課程伺服器沒有 Whisper：voice="auto" 不能在遊戲上方印「找不到 Whisper」（錄影片會拍到），改寫在 🎤 的提示文字。"""
+    pytest.importorskip("ipywidgets")
+    from bendan.ui import widget_mode
+    from bendan.voice import stt as stt_mod
+
+    def missing(*a, **k):
+        raise ImportError("no whisper")
+    monkeypatch.setattr(stt_mod, "MLXBackend", missing)
+    monkeypatch.setattr(stt_mod, "FasterWhisperBackend", missing)
+    monkeypatch.delenv("BENDAN_STT_URL", raising=False)
+    monkeypatch.delenv("BENDAN_STT", raising=False)
+    monkeypatch.setattr(voice.STATE, "backend", None)
+    monkeypatch.setattr(widget_mode, "Progress", lambda *a, **k: progress)
+    ui = widget_mode.play_widgets(level=0, mode="serious", seed=0, voice="auto", tts=False)
+    try:
+        assert "找不到 Whisper" not in capsys.readouterr().out
+        assert "data-stt='browser'" in ui.mic.value and "沒有 Whisper" in ui.mic.value
+    finally:
+        ui.quit()
+    voice.connect_stt("faster")                     # 明確指定要 Whisper 卻沒有 → 照樣提醒
+    assert "找不到 Whisper" in capsys.readouterr().out
+    voice.connect_stt("off", verbose=False)

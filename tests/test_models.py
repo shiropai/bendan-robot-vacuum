@@ -76,3 +76,28 @@ def test_text_mode_cell_does_not_block_run_all():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "scripts" / "build_notebooks.py").read_text(encoding="utf-8")
     assert 'code(\'# ▶️ 執行這格開始玩（文字模式）\\nsession = bendan.play(mode="silly")' not in src
+
+
+def test_seed_is_sent_and_dropped_if_the_server_rejects_it(course_server):
+    llm.STATE.client = FakeClient('{"actions": [], "say": "好"}')
+    llm.set_model("qwen2.5:7b")
+    llm.chat([{"role": "user", "content": "往前"}], seed=7)
+    assert llm.STATE.client.sent[-1]["seed"] == 7
+    llm.chat([{"role": "user", "content": "往前"}])
+    assert "seed" not in llm.STATE.client.sent[-1]
+
+    class Rejected(Exception):
+        status_code = 400
+
+    old_create = llm.STATE.client._create
+
+    def picky(**kw):
+        if "seed" in kw:
+            raise Rejected("Unrecognized request argument supplied: seed")
+        return old_create(**kw)
+    llm.STATE.client.chat.completions.create = picky
+    try:
+        assert llm.chat([{"role": "user", "content": "往前"}], seed=7) == '{"actions": [], "say": "好"}'
+        assert llm.STATE.seed_supported is False and "seed" not in llm.STATE.client.sent[-1]
+    finally:
+        llm.STATE.seed_supported = True

@@ -3,6 +3,7 @@
 就算模型多講廢話、包了 ```json，也盡量把 JSON 挖出來；但**動作必須完全在選單內**，否則整份輸出視為無效。
 """
 import json
+import math
 import re
 
 from ..world.constants import ACTION_WHITELIST, MAX_ACTIONS, MAX_FORWARD
@@ -27,20 +28,30 @@ def to_traditional(text):
 
 
 def _num(v):
+    """數字或數字字串 → float。bool、nan、inf（例如 "1e400"）和看不懂的都回傳 None。"""
+    if isinstance(v, bool):
+        return None
     try:
-        return float(v)
+        x = float(v)
     except (TypeError, ValueError):
         return None
+    return x if math.isfinite(x) else None
 
 
 def _as_int(n):
+    """整數或整數字串 → int，其他回傳 None。
+
+    字串要用 isdecimal() 判斷：isdigit() 對「²」「①」這種上標、圈圈數字也是 True，但 int() 轉不了，會讓整個驗證掛掉。
+    """
     if isinstance(n, bool):
         return None
-    if isinstance(n, str) and n.strip().isdigit():
+    if isinstance(n, int):
+        return n
+    if isinstance(n, float):
+        return int(n) if n.is_integer() else None
+    if isinstance(n, str) and n.strip().isdecimal():
         return int(n)
-    if isinstance(n, float) and n.is_integer():
-        return int(n)
-    return n if isinstance(n, int) else None
+    return None
 
 
 def extract_json(text):
@@ -79,10 +90,11 @@ def validate_output(obj):
             continue
         if op == "forward":
             # 單位是公分（"cm"）；也接受公尺（"m"）和舊格式的格數（"n"，一格 50 公分）
-            if "cm" in a:
-                n = cells_from_cm(a["cm"])
-            elif "m" in a:
-                n = cells_from_cm(_num(a["m"]) * 100) if _num(a["m"]) is not None else None
+            if "cm" in a or "m" in a:
+                cm = _num(a["cm"]) if "cm" in a else _num(a["m"])
+                if cm is not None and "cm" not in a:
+                    cm *= 100
+                n = cells_from_cm(cm) if cm is not None else None
             else:
                 n = _as_int(a.get("n"))
             if n is None or not 1 <= n <= MAX_FORWARD:

@@ -140,3 +140,45 @@ def test_widget_title_screen_start_and_back(progress):
         assert ui.on_title and ui.title_screen.layout.display == "flex"
     finally:
         ui.quit()
+
+
+
+def test_hud_splits_mood_change_into_tone_and_events(session_factory):
+    """罵它 -15，但同一句吸到灰塵又加回來：HUD 要分開寫，不然看起來像「罵了反而變開心」。"""
+    from bendan.render.hud import meters_html
+    s = session_factory(0, "silly")
+    drive(s, "笨蛋，往前走三格然後吸")
+    html_ = meters_html(s)
+    assert "這句：語氣 -15" in html_
+    s.mood.apply_events([{"type": "cleaned"}] * 3)     # 同一句又吸到三坨灰塵
+    assert "這句：語氣 -15、事件 +9" in meters_html(s)
+    drive(s, "右轉")                                 # 新的一句：重新計算
+    assert "語氣 -15" not in meters_html(s)
+
+
+def test_robot_stops_to_listen_while_the_model_thinks(progress):
+    """新計畫是照下指令那一刻的位置算的：模型在想的時候笨笨不能照舊計畫繼續走，不然新計畫會從錯的位置開始（走到乾淨的地方空吸）。"""
+    pytest.importorskip("ipywidgets")
+    from concurrent.futures import Future
+
+    from bendan.ui.widget_mode import WidgetGame
+    ui = WidgetGame(1, "serious", tick=0.01, progress=progress, seed=0)
+    try:
+        s = ui.session
+        s.apply("往前", {"actions": [{"op": "forward", "n": 6}], "say": "好", "ok": True, "format_ok": True,
+                         "raws": [], "latency": 0}, kind="local")
+        pending = Future()                              # 模型還在想
+        ui.future_info = {"command": "去吸左邊那坨", "kind": "command", "depth": 0}
+        ui.future = pending
+        time.sleep(0.03)
+        pose = (s.game.pos, s.game.facing, s.game.steps)
+        time.sleep(0.15)                                 # 十幾個 tick
+        assert (s.game.pos, s.game.facing, s.game.steps) == pose and s.busy()
+        pending.set_result({"actions": [], "say": "好", "ok": True, "format_ok": True, "raws": [], "latency": 1.2})
+        for _ in range(100):
+            if ui.future is None:
+                break
+            time.sleep(0.01)
+        assert ui.future is None and not ui._listening()
+    finally:
+        ui.quit()

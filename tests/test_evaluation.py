@@ -17,6 +17,27 @@ def test_run_eval_with_fake_llm():
     assert plot_summary(s, show=False)[:4] == b"\x89PNG"
 
 
+
+def test_run_eval_fixes_a_seed_per_question(monkeypatch):
+    """同一個模型重跑評估要得到一樣的結果：每一題送給模型的 seed 要固定，而且每題不同。"""
+    from bendan import llm
+    seen, real = [], llm.chat
+
+    def spy(messages, temperature=0.5, max_tokens=300, seed=None):
+        seen.append(seed)
+        return real(messages, temperature, max_tokens)
+    monkeypatch.setattr(llm, "chat", spy)
+    llm.STATE.fake.rng.seed(0)          # 假模型自己的亂數也歸零，兩輪的重試次數才會一樣
+    run_eval(modes=("silly",), verbose=False, save=False)
+    first = list(seen)
+    seen.clear()
+    llm.STATE.fake.rng.seed(0)
+    run_eval(modes=("silly",), verbose=False, save=False)
+    assert first == seen and None not in first and len(set(first)) == len(first)
+    seen.clear()
+    run_eval(modes=("silly",), verbose=False, save=False, seed=None)
+    assert set(seen) == {None}
+
 def test_mood_eval_with_fake_llm():
     df = run_mood_eval(tests=TEST_SET[:10], verbose=False, save=False)
     s = summarize_mood_eval(df)

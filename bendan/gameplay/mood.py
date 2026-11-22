@@ -36,6 +36,9 @@ EVENT_MOOD = {
     "dock_repair": +6,                                                                    # v8.1
 }
 
+INSULT_REACTION = ("主人這句話在罵你：say 一定要先回嘴一句（委屈、傲嬌或酸回去都可以，不准罵髒話），"
+                   "不要假裝沒聽到；actions 照你現在的心情決定")
+
 PROMPTS = {
     "開心": "主人對你很好，你很願意配合，actions 要照指令做好。say 語氣輕快、可以撒嬌。",
     "普通": "",
@@ -103,6 +106,8 @@ class Mood:
         self.last_delta = 0
         self.lowest = self.value
         self.recovered_from_sulk = False   # 成就用：從鬧彆扭哄回開心
+        self.turn_tags = []                 # 主人「這一句」的語氣標籤（每句指令重算，不會殘留到下一句）
+        self.turn = {}                      # 這一句造成的心情變化，依來源分開：{"語氣": -15, "事件": +9}，HUD 用
 
     @property
     def tier(self):
@@ -124,14 +129,16 @@ class Mood:
     def refuse_chance(self):
         return self.tier[4]
 
-    def apply(self, delta, reason=""):
-        """改變心情；如果跨過等級門檻，回傳一個 mood 事件。"""
+    def apply(self, delta, reason="", source=None):
+        """改變心情；如果跨過等級門檻，回傳一個 mood 事件。source（"語氣"／"事件"）會記進 self.turn 給 HUD 顯示。"""
         if not delta:
             return []
         if reason:
             self.last_delta = delta
-        before = self.name
+        before, old = self.name, self.value
         self.value = max(0.0, min(100.0, self.value + delta))
+        if source:                        # 記實際的變化（已經 100 分時再 +3 不算）
+            self.turn[source] = self.turn.get(source, 0) + (self.value - old)
         self.lowest = min(self.lowest, self.value)
         if reason:
             self.last_reason = reason
@@ -145,23 +152,35 @@ class Mood:
         return [{"type": "mood", "msg": msgs[after], "tier": after}]
 
     def apply_tone(self, tone):
-        return self.apply(tone.delta, tone.describe())
+        """每句指令一開始呼叫一次：換成這一句的語氣，並重新計算「這一句」的心情變化。"""
+        self.turn_tags, self.turn = list(tone.tags), {}
+        return self.apply(tone.delta, tone.describe(), source="語氣")
 
     def apply_events(self, events):
         out = []
         for e in events:
             d = EVENT_MOOD.get(e["type"])
             if d:
-                out += self.apply(d)
+                out += self.apply(d, source="事件")
         return out
 
     def should_refuse(self, rng):
         return rng.random() < self.refuse_chance
 
-    def prompt_text(self):
+    def prompt_text(self, react=False):
+        """【你的心情】那一段。react=True（玩家剛下的指令，不是回饋回合）時，主人這句罵人就一定要回嘴。"""
         extra = PROMPTS[self.name]
-        why = f"（主人剛剛：{self.last_reason}）" if self.last_reason else ""
+        # 以前用 last_reason：罵過一次之後，後面每一句都還寫著「主人剛剛：罵人」，直到下一句有語氣標籤才換掉
+        why = f"（主人這句話：{'、'.join(self.turn_tags)}）" if self.turn_tags else ""
         if self.name in ("不爽", "鬧彆扭") and self.last_delta > 0:
             # 實測：主人已經在好好說話了，模型卻還說「幹嘛這麼兇」→ 情緒要跟著最新的語氣軟化
             extra = "你之前被兇過、還有點不爽，但主人剛剛有好好說話，你氣消了一點：語氣可以傲嬌，不要再說主人兇。"
+        if react and "罵人" in self.turn_tags:
+            # 實測：罵一次「笨蛋」心情 65 → 50，還在「普通」這一級，PROMPTS 沒有任何指示 → 模型完全沒反應
+            extra = (extra + "。" if extra else "") + INSULT_REACTION
         return f"{self.name}（{self.value:.0f}/100）{why}" + (f"。{extra}" if extra else "")
+
+    def turn_text(self):
+        """HUD 用：這一句的心情變化，語氣和事件分開（例如「這句：語氣 -15、事件 +9」）。沒變化回傳空字串。"""
+        parts = [f"{k} {v:+.0f}" for k, v in self.turn.items() if round(v)]
+        return "這句：" + "、".join(parts) if parts else ""

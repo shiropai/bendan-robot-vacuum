@@ -510,7 +510,7 @@ def mic_html(stt_label=""):
     if stt_label:
         mode, tip = "whisper", f"按住說話、放開送出（只點一下＝開始，再點一下結束）｜{stt_label}"
     else:
-        mode, tip = "browser", "語音輸入（按一下開始說話）"
+        mode, tip = "browser", "語音輸入（按一下開始說話）｜這台電腦沒有 Whisper，改用瀏覽器的語音辨識"
     return (f"<div class='bd-micbox'><button class='bd-mic' data-act='mic' data-stt='{mode}' "
             f"title='{html.escape(tip, quote=True)}'>🎤</button>"
             "<label title='辨識完自動送出（取消的話會先放進輸入框，讓你改一改再按 Enter）'>"
@@ -884,7 +884,10 @@ class WidgetGame:
             try:
                 g = self.session.game
                 before = (g.steps, g.pos, g.facing, g.vacuum, g.driving)
-                ev = self.session.tick()
+                # 模型在想「新指令」時，笨笨先停下來聽（世界也一起暫停）。新計畫是照下指令那一刻的位置和方向算的；
+                # 以前笨笨會照舊計畫多走 1–2 秒（2–3 步），新計畫到了就從錯的位置開始 → 走到乾淨的地方空吸、撞牆。
+                # 舊計畫反正會被新計畫取代，停下來不會少做什麼；回饋回合是動作做完才問，不受影響。
+                ev = [] if self._listening() else self.session.tick()
                 g = self.session.game
                 if ev:
                     self.events.extend(ev)
@@ -922,6 +925,11 @@ class WidgetGame:
             except Exception as exc:   # noqa: BLE001
                 self.side.value = f"<pre>背景迴圈錯誤：{html.escape(repr(exc))}</pre>"
             time.sleep(self.tick_s)
+
+    def _listening(self):
+        """正在等模型回覆玩家剛下的指令（不是回饋回合）→ 笨笨停下來聽。"""
+        info = self.future_info
+        return self.future is not None and bool(info) and info.get("kind") == "command"
 
     def _render(self, force=False):
         thinking = self.future is not None
@@ -982,7 +990,9 @@ def play_widgets(level=None, mode="silly", tick=0.5, feedback_rounds=1, unlock_a
     if voice not in (None, False, "off"):
         from .. import voice as voice_mod
         if isinstance(voice, str):
-            stt = voice_mod.STATE.backend or voice_mod.connect_stt(voice)
+            # "auto" 安靜偵測：找不到 Whisper 就改用瀏覽器語音辨識，狀態寫在 🎤 的提示文字裡。
+            # 不要在遊戲視窗上方印「找不到 Whisper」（課程伺服器一定沒有，錄影片會拍到）；明確指定後端時才印。
+            stt = voice_mod.STATE.backend or voice_mod.connect_stt(voice, verbose=voice != "auto")
         else:
             stt = voice
     if _ACTIVE_UI is not None:
