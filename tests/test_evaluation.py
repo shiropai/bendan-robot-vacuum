@@ -23,7 +23,7 @@ def test_run_eval_fixes_a_seed_per_question(monkeypatch):
     from bendan import llm
     seen, real = [], llm.chat
 
-    def spy(messages, temperature=0.5, max_tokens=300, seed=None):
+    def spy(messages, temperature=0.5, max_tokens=300, seed=None, **kw):
         seen.append(seed)
         return real(messages, temperature, max_tokens)
     monkeypatch.setattr(llm, "chat", spy)

@@ -52,10 +52,11 @@
   │ 若被中斷 → pending_feedback → 再 think 一次（事件回饋閉環）
 ```
 
-## 三層把關
+## 四層把關
 
 | 層 | 位置 | 檢查什麼 | 為什麼 |
 |---|---|---|---|
+| 0. 結構化輸出（v9.2） | `llm/client.py`、`agent/parsing.py: REPLY_SCHEMA` | 請求帶回覆的 JSON Schema，伺服器在生成時就限制每一個字 | 格式錯誤從源頭消失；伺服器不支援就依序退回 `json_schema_lite`（去掉範圍）→ `json_object` → 純 Prompt，實際格式記在 log |
 | 1. 白名單驗證 | `agent/parsing.py` | JSON 格式、動作名稱、參數範圍；`turn_*`／`suck` 可帶 `n`（展開成重複動作） | 模型輸出不可信；失敗自動重試一次，再失敗就「發呆」 |
 | 2. 程式護欄 | `agent/guardrail.py` | 在複製的世界模擬計畫，會闖禁區就在前一步截斷 | 實測 7B 模型 67–83% 的計畫無視禁區；`Session(guardrail=True)` 或遊戲中 `/guard` 開啟 |
 | 3. 遊戲規則 | `world/game.py`、`gameplay/` | 碰撞、電量、血壓、指令上限、步數上限 | 世界本身的物理與勝負 |

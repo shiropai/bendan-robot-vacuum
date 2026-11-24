@@ -181,6 +181,9 @@ body.bendan-popup-body{overflow:auto!important;margin:0;background:#fffdf8!impor
 .bd-3dover{display:none;position:absolute;left:0;right:0;top:42%;text-align:center;font-size:40px;font-weight:bold;
   color:#2a9d8f;background:rgba(255,255,255,.85);padding:6px 0}
 .bd-3dmsg{padding:40px;text-align:center;color:#666}
+.bd-recbadge{display:none;position:absolute;right:10px;top:10px;font:bold 13px system-ui,sans-serif;color:#fff;background:rgba(214,40,40,.85);border-radius:8px;padding:3px 9px;pointer-events:none;animation:bdblink 1.6s infinite}
+.bd-recdone{display:none;position:absolute;right:10px;bottom:8px;font-size:13px;background:rgba(255,255,255,.92);border-radius:8px;padding:3px 9px}
+.bd-recbtn .bd-rec-on{display:none}.bd-recording .bd-recbtn .bd-rec-on{display:inline}.bd-recording .bd-recbtn .bd-rec-off{display:none}.bd-recording .bd-recbtn{background:#d62828;color:#fff;border-color:#9b1c1c}
 kbd{border:1px solid #bbb;border-bottom-width:2px;border-radius:4px;padding:0 4px;font-size:11px;background:#fafafa}
 """
 
@@ -236,6 +239,7 @@ var tries = 0;
       else if (act === 'cam') { var b3 = root.__bendan3d; if (b3 && b3.cycleCam) b3.cycleCam(); }
       else if (act === 'quality') { var b4 = root.__bendan3d; if (b4 && b4.cycleQuality) b4.cycleQuality(); }
       else if (act === 'stats') { var b5 = root.__bendan3d; if (b5 && b5.toggleStats) b5.toggleStats(); }
+      else if (act === 'rec') { var b6 = root.__bendan3d; if (b6 && b6.toggleRec) b6.toggleRec(); else toast('🎬 3D 畫面還沒載入好，等一下再按。', 5000); }
       else if (act === 'mic') { if (micMode() !== 'whisper') mic(a); }
       else if (act === 'close-toast') { var t = q('.bd-toast'); if (t) t.style.display = 'none'; }
       return;
@@ -648,7 +652,10 @@ class WidgetGame:
         st = {"x": g.pos[0], "y": g.pos[1], "f": g.facing, "tick": self.tick_s,
               "lid": MOOD_LID.get(mood, "#98c1d9"), "emo": EMOTION_ICON.get(s.emotion, ""),
               "think": self.future is not None, "low": g.battery_pct < 25, "vac": g.vacuum, "drv": g.driving,
-              "sayN": self.say_n, "say": self.say, "sayEmo": s.emotion or "普通", "tts": bool(self.tb_tts.value)}
+              "sayN": self.say_n, "say": self.say, "sayEmo": s.emotion or "普通", "tts": bool(self.tb_tts.value),
+              # 🎬 錄影的字幕和檔名用：最近一句主人的指令、關卡名稱
+              "cmdN": s.history[-1]["no"] if s.history else 0, "cmd": s.history[-1]["cmd"] if s.history else "",
+              "lv": level_title(g.level_id)}
         data = json.dumps(st, ensure_ascii=False).replace("</", "<\\/")
         return f"<script type='application/json' class='bd-botjs'>{data}</script>"
 
@@ -676,6 +683,8 @@ class WidgetGame:
                 "<button class='bd-btn' data-act='stats' title='顯示 FPS、每張畫面的繪圖次數'>📈 效能</button>"
                 "<button class='bd-btn bd-cam' data-act='cam' title='按一下換下一個視角：跟隨 → 笨笨視角 → 俯瞰 → 監視器'>"
                 "🎥 換視角</button>"
+                "<button class='bd-btn bd-recbtn' data-act='rec' title='把 3D 畫面（含字幕和音效）錄成影片檔；錄影時每 5 秒自動換機位：跟隨 → 監視器 → 笨笨視角 → 俯瞰'>"
+                "<span class='bd-rec-off'>🎬 錄影</span><span class='bd-rec-on'>⏹ 停止錄影</span></button>"
                 f"</div></div>{closer}")
 
     # ---------- 玩家操作 ----------

@@ -24,8 +24,13 @@ class LLMState:
         self.client = None
         self.model = config.DEFAULT_MODEL
         self.use_fake = True
-        self.json_mode = False          # True = 要求 vLLM 強制輸出 JSON（response_format）
+        self.json_mode = False          # True = 沒給 schema 時也要求 vLLM 強制輸出 JSON 物件（response_format json_object）
         self.json_supported = True
+        # 結構化輸出（v9.2）：呼叫端給 schema 時，用 response_format json_schema 讓伺服器限制模型的每一個字。
+        # structured=False 是對照組（純 Prompt）。伺服器不支援的等級會記在 bad_formats，之後直接跳過。
+        self.structured = True
+        self.bad_formats = set()
+        self.last_format = None         # 上一次呼叫實際用的格式："json_schema"／"json_schema_lite"／"json_object"／"plain"
         self.seed_supported = True       # 送 seed 讓抽樣可重現（vLLM、OpenAI、Ollama 都吃）
         self.available_models = []
         self.fake = FakeLLM()
@@ -155,10 +160,19 @@ def model_name():
     return "FakeLLM(離線)" if STATE.use_fake else STATE.model
 
 
-def chat(messages, temperature=0.5, max_tokens=300, seed=None):
-    """送出 messages，回傳模型的文字回覆。seed：固定抽樣（同樣的 messages＋seed → 同樣的回覆），評估用。"""
+FORMATS = ("json_schema", "json_schema_lite", "json_object", "plain")   # 由嚴到鬆；不支援就往下一個退
+
+
+def chat(messages, temperature=0.5, max_tokens=300, seed=None, schema=None):
+    """送出 messages，回傳模型的文字回覆。
+
+    seed：固定抽樣（同樣的 messages＋seed → 同樣的回覆），評估用。
+    schema：回覆的 JSON Schema。給了就用結構化輸出（伺服器保證格式正確）；伺服器不支援時自動退回，
+    實際用的格式記在 STATE.last_format（評估、log 用，避免不同格式的結果混在一起比較）。
+    """
     _ensure()
     if STATE.use_fake:
+        STATE.last_format = "fake"
         return STATE.fake.chat(messages, temperature)
     if is_qwen3(STATE.model) and messages and messages[-1].get("role") == "user":
         # Qwen3 預設會先輸出一大段 <think> 思考過程（又慢又會被 max_tokens 截斷）。實測課程伺服器：
@@ -167,17 +181,62 @@ def chat(messages, temperature=0.5, max_tokens=300, seed=None):
     kwargs = dict(model=STATE.model, messages=messages, temperature=temperature, max_tokens=max_tokens, stream=False)
     if seed is not None and STATE.seed_supported:
         kwargs["seed"] = int(seed)
-    if STATE.json_mode and STATE.json_supported:
+    for fmt in _formats(schema):
         try:
-            resp = _create(response_format={"type": "json_object"}, **kwargs)
-            return _clean(resp.choices[0].message.content)
+            resp = _create(**kwargs, **_response_format(fmt, schema))
         except Exception as exc:   # noqa: BLE001
-            if getattr(exc, "status_code", None) not in (400, 422):
+            if fmt == "plain" or getattr(exc, "status_code", None) not in (400, 422):
                 raise
-            STATE.json_supported = False
-            print("⚠️ 伺服器不支援 response_format，改回一般模式。")
-    resp = _create(**kwargs)
-    return _clean(resp.choices[0].message.content)
+            STATE.bad_formats.add(fmt)
+            print(f"⚠️ 伺服器不支援 {fmt}，改用下一種格式。（{str(exc)[:80]}）")
+            continue
+        STATE.last_format = fmt
+        return _clean(resp.choices[0].message.content)
+    raise RuntimeError("沒有可用的輸出格式")      # 走不到這裡：plain 一定會試
+
+
+def _formats(schema):
+    if schema is not None and STATE.structured:
+        order = list(FORMATS)
+    elif STATE.json_mode and STATE.json_supported:
+        order = ["json_object", "plain"]
+    else:
+        order = ["plain"]
+    return [f for f in order if f == "plain" or f not in STATE.bad_formats]
+
+
+def _response_format(fmt, schema):
+    if fmt in ("json_schema", "json_schema_lite"):
+        sch = schema if fmt == "json_schema" else _strip_bounds(schema)
+        return {"response_format": {"type": "json_schema",
+                                    "json_schema": {"name": "bendan_reply", "schema": sch, "strict": True}}}
+    if fmt == "json_object":
+        return {"response_format": {"type": "json_object"}}
+    return {}
+
+
+_BOUND_KEYS = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minItems", "maxItems",
+               "minLength", "maxLength", "pattern"}
+
+
+def _strip_bounds(obj):
+    """拿掉數值範圍、長度限制這類有些伺服器不支援的關鍵字（json_schema_lite 用）。"""
+    if isinstance(obj, dict):
+        return {k: _strip_bounds(v) for k, v in obj.items() if k not in _BOUND_KEYS}
+    if isinstance(obj, list):
+        return [_strip_bounds(v) for v in obj]
+    return obj
+
+
+@contextmanager
+def structured_output(on=True):
+    """暫時開關結構化輸出（評估「純 Prompt vs json_schema」用）。"""
+    old = STATE.structured
+    STATE.structured = on
+    try:
+        yield
+    finally:
+        STATE.structured = old
 
 
 def _create(**kwargs):
