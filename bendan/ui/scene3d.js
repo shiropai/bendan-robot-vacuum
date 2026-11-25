@@ -162,6 +162,8 @@
     var over = document.createElement('div'); over.className = 'bd-3dover'; host.appendChild(over);
     var rec = document.createElement('div'); rec.className = 'bd-rec'; host.appendChild(rec);
     var hint = document.createElement('div'); hint.className = 'bd-3dhint'; host.appendChild(hint);
+    var recBadge = document.createElement('div'); recBadge.className = 'bd-recbadge'; host.appendChild(recBadge);
+    var recDone = document.createElement('div'); recDone.className = 'bd-recdone'; host.appendChild(recDone);
 
     var scene = new THREE.Scene();
     scene.background = new THREE.Color('#cfd9e2');
@@ -1159,7 +1161,9 @@
       var i = 0; CAMS.forEach(function (c, k) { if (c[0] === cam) i = k; });
       setCam(CAMS[(i + 1) % CAMS.length][0]);
     });
-    function setCam(c) {
+    function setCam(c, auto) {
+      if (c === 'cctv' && cam !== 'cctv') cctvPick++;         // 每次切到監視器，換房間的下一個角落
+      if (REC && !auto) REC.lastCut = performance.now();      // 錄影時手動換機位：導播重新計時
       cam = c; lastActive = performance.now();
       var btn = bar.querySelector('[data-camnext]');
       CAMS.forEach(function (k) { if (k[0] === c) btn.textContent = k[1] + ' ▸'; });
@@ -1184,7 +1188,14 @@
       var win = cvs.ownerDocument.defaultView || window;     // 彈出視窗後要用新視窗的 rAF
       win.requestAnimationFrame(loop);
       var dt = Math.min(clock.getDelta(), 0.05), now = performance.now(), T = clock.elapsedTime;
-      if (!cvs.isConnected || cvs.offsetParent === null) return;          // 畫面被藏起來（主畫面、別的分頁）：完全不畫
+      if (!cvs.isConnected || cvs.offsetParent === null) {               // 畫面被藏起來（主畫面、別的分頁）：完全不畫
+        if (REC && now - REC.lastFrame > 5000) stopRec('遊戲畫面被關掉了，自動停止錄影');
+        return;
+      }
+      if (REC) {                                                          // 🎬 錄影中：每張都要畫（不降速），導播定時換機位
+        lastActive = now;
+        if (now - REC.lastCut > REC.every) { var ci = CUT_ORDER.indexOf(cam); setCam(CUT_ORDER[(ci + 1) % CUT_ORDER.length], true); REC.lastCut = now; }
+      }
       var W = host.clientWidth || 640, H = Math.round(W * 0.6);
       if (cvs.width !== Math.round(W * renderer.getPixelRatio())) { renderer.setSize(W, H); camera.aspect = W / H; camera.updateProjectionMatrix(); lastActive = now; }
       if (now - lastActive > 1500 && now - lastRender < 110) return;        // 沒東西在動：降到每秒約 9 張（省電、不燙）
@@ -1317,7 +1328,7 @@
       } else if (cam === 'cctv') {
         var room = roomAt[target.x + ',' + target.z] || '客廳', b = roomBox[room] || { x0: 0, y0: 0, x1: house.w - 1, y1: house.h - 1 };
         var corners = [[b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]].filter(function (c) { return roomAt[c[0] + ',' + c[1]] === room; });
-        var c0 = corners[0] || [b.x0, b.y0], ccx = (b.x0 + b.x1) / 2, ccz = (b.y0 + b.y1) / 2;
+        var c0 = corners.length ? corners[cctvPick % corners.length] : [b.x0, b.y0], ccx = (b.x0 + b.x1) / 2, ccz = (b.y0 + b.y1) / 2;
         wantPos = V(c0[0] + (c0[0] < ccx ? -0.4 : 0.4), WALL_H - 0.25, c0[1] + (c0[1] < ccz ? -0.4 : 0.4));
         wantLook = rp.clone().add(V(0, 0.1, 0)); snap = true;
         rec.textContent = '● REC   CAM-' + room + '   ' + new Date().toLocaleString('zh-TW', { hour12: false });
@@ -1346,6 +1357,7 @@
         });
       });
       renderer.render(scene, camera);
+      if (REC) recFrame(now);
       lastRender = now; frames++;
       var moving = motion.moving() || driving || parts.length || tweens.length || override || spin.dur || thinking || (dmg && !wrecked) ||
         debris.some(function (d) { return !d.rest; }) || camPos.distanceToSquared(wantPos) > 0.0004 ||
@@ -1375,12 +1387,142 @@
       lastActive = performance.now();
       return quality;
     }
+    // ---------- 🎬 錄影（v9.2）：3D 畫面＋字幕＋音效錄成影片檔；錄影時「導播」每隔幾秒自動換機位 ----------
+    // 錄的是另一張 1280×768 的畫布：每張 3D 畫面畫好後貼上去，再疊上錄影時間、機位、主人的指令和笨笨的回話（字幕）。
+    // 音效（WebAudio）一起錄；笨笨的語音（瀏覽器的 speechSynthesis）抓不到，所以靠字幕。
+    var REC = null, lastRec = null, lastRecUrl = null, cctvPick = 0;
+    var CUT_ORDER = ['follow', 'cctv', 'eye', 'top'];          // 導播換機位的順序（就是 🎥 的四個機位）
+    var REC_TYPES = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    var REC_MAX_MS = 10 * 60 * 1000;                            // 最長 10 分鐘（約 375 MB 以內），避免把記憶體吃光
+    function startRec(every) {
+      if (REC) return true;
+      if (!cvs.isConnected || cvs.offsetParent === null) { toast('🎬 先按「▶ 開始遊戲」，看到 3D 畫面再錄影。', 6000); return false; }
+      var doc = cvs.ownerDocument, win = doc.defaultView || window, MR = win.MediaRecorder || window.MediaRecorder;
+      var c = doc.createElement('canvas'); c.width = 1280; c.height = 768;
+      if (!c.captureStream || !MR) { toast('😵 這個瀏覽器不能錄影：請用新版 Chrome 或 Edge。', 8000); return false; }
+      var type = REC_TYPES.filter(function (t) { return MR.isTypeSupported(t); })[0] || '';
+      var stream = c.captureStream(30), a = actx();
+      if (a && a.createMediaStreamDestination) {                 // 音效：主音軌多接一條到錄影
+        if (!a.__recDest) { a.__recDest = a.createMediaStreamDestination(); out(a).connect(a.__recDest); }
+        a.__recDest.stream.getAudioTracks().forEach(function (t) { stream.addTrack(t); });
+      }
+      var mr;
+      try { mr = new MR(stream, type ? { mimeType: type, videoBitsPerSecond: 5000000 } : { videoBitsPerSecond: 5000000 }); }
+      catch (e) { toast('😵 錄影啟動失敗：' + e.message, 8000); return false; }
+      var t0 = performance.now();
+      var R0 = REC = { canvas: c, g: c.getContext('2d'), mr: mr, chunks: [], type: mr.mimeType || type || 'video/webm', t0: t0,
+                       lastCut: t0, lastFrame: t0, every: Math.max(2, every || 5) * 1000, sayN: null, cmdN: null, badgeAt: 0 };
+      mr.ondataavailable = function (e) { if (e.data && e.data.size) R0.chunks.push(e.data); };
+      mr.onstop = function () { saveRec(R0); };
+      mr.start(1000);
+      root.classList.add('bd-recording'); recBadge.style.display = 'block'; recDone.style.display = 'none';
+      if (bot.st) { R0.sayN = bot.st.sayN; R0.cmdN = bot.st.cmdN; }   // 開始錄之前的對話不要當字幕
+      lastActive = t0;
+      return true;
+    }
+    function stopRec(why) {
+      if (!REC) return false;
+      var R0 = REC; REC = null;
+      R0.seconds = (performance.now() - R0.t0) / 1000; R0.why = why || '';
+      root.classList.remove('bd-recording'); recBadge.style.display = 'none';
+      try { R0.mr.stop(); } catch (e) { saveRec(R0); }
+      R0.mr.stream.getVideoTracks().forEach(function (t) { t.stop(); });
+      return false;
+    }
+    function saveRec(R0) {
+      if (R0.saved) return; R0.saved = true;
+      var doc = cvs.ownerDocument, win = doc.defaultView || window, ext = /mp4/.test(R0.type) ? 'mp4' : 'webm';
+      var blob = new Blob(R0.chunks, { type: R0.type.split(';')[0] }), d = new Date();
+      function p2(n) { return ('0' + n).slice(-2); }
+      var lv = ((bot.st && bot.st.lv) || '').replace(/[\\/:*?"<>|\s｜]+/g, '');
+      var name = '笨笨掃地機_' + (lv ? lv + '_' : '') + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' +
+                 p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '.' + ext;
+      var mb = (blob.size / 1048576).toFixed(1), secs = Math.round(R0.seconds || 0);
+      if (lastRecUrl) (win.URL || URL).revokeObjectURL(lastRecUrl);
+      lastRecUrl = (win.URL || URL).createObjectURL(blob);
+      lastRec = { name: name, bytes: blob.size, type: R0.type, seconds: R0.seconds, why: R0.why, blob: blob };
+      var link = doc.createElement('a'); link.href = lastRecUrl; link.download = name;
+      link.textContent = '⬇️ 下載剛剛的錄影（' + secs + ' 秒，' + mb + ' MB）';
+      recDone.innerHTML = ''; recDone.appendChild(link); recDone.style.display = 'block';
+      try { link.click(); } catch (e) {}
+      toast('🎬 錄好了：' + name + '（' + secs + ' 秒，' + mb + ' MB）' + (R0.why ? '｜' + R0.why : '') +
+            '。沒有自動下載的話，按 3D 畫面右下角的「⬇️ 下載剛剛的錄影」；瀏覽器說「無法安全下載」時選「保留」。', 12000);
+    }
+    var cctvMaskCvs = null;
+    function cctvMask(W, H) {                                    // 掃描線＋暗角（只做一次）
+      if (cctvMaskCvs) return cctvMaskCvs;
+      var c = cvs.ownerDocument.createElement('canvas'); c.width = W; c.height = H;
+      var g = c.getContext('2d'); g.fillStyle = 'rgba(0,0,0,0.08)';
+      for (var y = 0; y < H; y += 4) g.fillRect(0, y, W, 2);
+      var v = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.62);
+      v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.45)'); g.fillStyle = v; g.fillRect(0, 0, W, H);
+      return (cctvMaskCvs = c);
+    }
+    function camLabel() {
+      var t = ''; CAMS.forEach(function (k) { if (k[0] === cam) t = k[1]; });
+      if (cam === 'cctv') t += '  CAM-' + (roomAt[target.x + ',' + target.z] || '客廳');
+      return t;
+    }
+    function pill(g, text, x, y, size, color, align) {         // 半透明黑底的小標籤
+      g.font = 'bold ' + size + 'px system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif';
+      var w = g.measureText(text).width, pad = size * 0.45, x0 = align === 'right' ? x - w - pad * 2 : x;
+      g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x0, y, w + pad * 2, size + pad * 1.4);
+      g.fillStyle = color; g.textAlign = 'left'; g.textBaseline = 'top'; g.fillText(text, x0 + pad, y + pad * 0.7);
+    }
+    function wrapText(g, text, maxW) {
+      var lines = [], line = '';
+      Array.from(text).forEach(function (ch) {
+        if (line && g.measureText(line + ch).width > maxW) { lines.push(line); line = ch; } else line += ch;
+      });
+      if (line) lines.push(line);
+      return lines.slice(0, 3);
+    }
+    function recFrame(now) {
+      var R0 = REC, g = R0.g, W = R0.canvas.width, H = R0.canvas.height, st = bot.st || {};
+      // 監視器的黑白掃描線在畫面上是 CSS 效果，錄影畫布要自己畫一次
+      g.filter = cam === 'cctv' ? 'grayscale(0.45) contrast(1.15) brightness(1.05)' : 'none';
+      try { g.drawImage(cvs, 0, 0, W, H); } catch (e) { g.filter = 'none'; return; }
+      g.filter = 'none';
+      if (cam === 'cctv') g.drawImage(cctvMask(W, H), 0, 0);
+      R0.lastFrame = now;
+      if (st.cmdN !== R0.cmdN) { R0.cmdN = st.cmdN; R0.cmd = st.cmd || ''; R0.cmdAt = now; }
+      if (st.sayN !== R0.sayN) { R0.sayN = st.sayN; R0.say = st.say || ''; R0.sayAt = now; }
+      var sec = Math.floor((now - R0.t0) / 1000), tc = Math.floor(sec / 60) + ':' + ('0' + sec % 60).slice(-2);
+      pill(g, '● REC ' + tc + '   ' + camLabel(), 18, 16, 22, '#ff5a5a');
+      pill(g, '🧹 笨笨掃地機' + (st.lv ? '｜' + st.lv : ''), W - 18, 16, 22, '#ffffff', 'right');
+      if (over.style.display === 'block' && over.textContent) {            // 過關／爆炸的大字
+        g.font = 'bold 64px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.lineWidth = 8; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.strokeText(over.textContent, W / 2, H * 0.42);
+        g.fillStyle = over.style.color || '#fff'; g.fillText(over.textContent, W / 2, H * 0.42);
+      }
+      var subs = [];                                                       // 字幕：主人的指令、笨笨的回話（各顯示 9 秒）
+      if (R0.cmd && now - R0.cmdAt < 9000) subs.push(['🧑 主人：' + R0.cmd, '#ffe08a']);
+      if (R0.say && now - R0.sayAt < 9000 && (!R0.cmdAt || R0.sayAt >= R0.cmdAt)) subs.push(['🤖 笨笨：' + R0.say, '#ffffff']);
+      if (subs.length) {
+        var fs = 28, lh = fs * 1.35, rows = [];
+        g.font = 'bold ' + fs + 'px system-ui, -apple-system, "PingFang TC", "Noto Sans TC", sans-serif';
+        subs.forEach(function (sb) { wrapText(g, sb[0], W * 0.84).forEach(function (ln) { rows.push([ln, sb[1]]); }); });
+        var y = H - 22 - rows.length * lh;
+        g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(W * 0.06, y - 10, W * 0.88, rows.length * lh + 18);
+        g.textAlign = 'center'; g.textBaseline = 'top';
+        rows.forEach(function (r, i) { g.fillStyle = r[1]; g.fillText(r[0], W / 2, y + i * lh); });
+      }
+      if (now - R0.badgeAt > 400) {
+        R0.badgeAt = now;
+        recBadge.textContent = '● 錄影中 ' + tc + '｜每 ' + Math.round(R0.every / 1000) + ' 秒自動換機位（' + camLabel() + '）';
+      }
+      if (now - R0.t0 > REC_MAX_MS) stopRec('錄滿 10 分鐘，自動停止');
+    }
     var stats = document.createElement('div'); stats.className = 'bd-stats'; stats.style.display = 'none'; host.appendChild(stats);
     loop();
     // 除錯用：在瀏覽器 console 可以看場景狀況（root.__bendan3d.info()）
     root.__bendan3d = { scene: scene, camera: camera, setCam: setCam,
       cycleCam: function () { var i = 0; CAMS.forEach(function (c, k) { if (c[0] === cam) i = k; }); setCam(CAMS[(i + 1) % CAMS.length][0]); return cam; },
       setQuality: setQuality, cycleQuality: function () { return setQuality(QORDER[(QORDER.indexOf(quality) + 1) % QORDER.length]); },
+      toggleRec: function (every) { return REC ? stopRec() : startRec(every); },
+      startRec: startRec, stopRec: stopRec, recBlob: function () { return lastRec && lastRec.blob; },
+      recState: function () { return REC ? { on: true, seconds: (performance.now() - REC.t0) / 1000, cam: cam, type: REC.type, every: REC.every / 1000 }
+                                        : { on: false, last: lastRec && { name: lastRec.name, bytes: lastRec.bytes, type: lastRec.type, seconds: lastRec.seconds } }; },
       toggleStats: function () { stats.style.display = stats.style.display === 'none' ? 'block' : 'none'; lastActive = performance.now(); return stats.style.display !== 'none'; },
       perf: function () { var i = renderer.info; return { quality: quality, calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, idle: performance.now() - lastActive > 1500 }; },
       info: function () {

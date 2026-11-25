@@ -182,3 +182,24 @@ def test_robot_stops_to_listen_while_the_model_thinks(progress):
         assert ui.future is None and not ui._listening()
     finally:
         ui.quit()
+
+
+def test_record_button_and_director_are_wired(progress):
+    """🎬 錄影：按鈕在遊戲右上角；錄影時導播輪流用四個機位；字幕要的資料（主人指令、關卡名稱）有送到前端。"""
+    pytest.importorskip("ipywidgets")
+    from bendan.ui.widget_mode import SCENE3D_JS, WidgetGame
+    for key in ("toggleRec", "captureStream", "MediaRecorder", "CUT_ORDER = ['follow', 'cctv', 'eye', 'top']", "recFrame"):
+        assert key in SCENE3D_JS, key
+    ui = WidgetGame(1, "serious", tick=0.01, progress=progress, seed=0)
+    try:
+        assert "data-act='rec'" in ui._head_html() and "🎬 錄影" in ui._head_html()
+        assert "toggleRec" in ui.js.value and "bd-recording" in ui.js.value
+        ui._take_input("往前走 1 公尺")
+        for _ in range(300):
+            if ui.future is None and not ui.session.busy():
+                break
+            time.sleep(0.01)
+        bot = json.loads(ui._bot_html(None).split("'bd-botjs'>")[1].split("</script>")[0])
+        assert bot["cmd"] == "往前走 1 公尺" and bot["cmdN"] >= 1 and bot["lv"]
+    finally:
+        ui.quit()

@@ -9,7 +9,7 @@ from contextlib import nullcontext
 from .. import llm
 from .flavor import level_flavor, pick_flavor
 from .memory import Memory, events_to_text
-from .parsing import parse_reply
+from .parsing import REPLY_SCHEMA, parse_reply
 from .perception import describe_world
 from .prompts import (ACTION_SPEC, FEEDBACK_TEXT, PERSONA_SERIOUS, PERSONA_SILLY, REFUSE_TEXT,
                       SILLY_STRENGTH)
@@ -71,13 +71,14 @@ class Agent:
         result = {"command": command, "mode": self.mode, "raws": [], "errors": [],
                   "format_ok": False, "retried": False, "ok": False, "dazed": False,
                   "actions": [], "say": "", "emotion": None, "refused": False, "flavor": self.last_flavor,
-                  "temperature": temperature}
+                  "temperature": temperature, "format": None}
         t0 = time.perf_counter()
         call_seed = self.llm_rng.randrange(2 ** 31) if self.llm_rng else None
         for attempt in range(2):                # 解析失敗自動重試一次
             try:
-                raw = llm.chat(messages, temperature=temperature,
+                raw = llm.chat(messages, temperature=temperature, schema=REPLY_SCHEMA,
                                seed=None if call_seed is None else call_seed + attempt)
+                result["format"] = llm.STATE.last_format
             except Exception as exc:            # noqa: BLE001 — API 出錯就發呆，不讓遊戲當掉
                 result["errors"].append(f"API 錯誤：{type(exc).__name__}: {str(exc)[:100]}")
                 break

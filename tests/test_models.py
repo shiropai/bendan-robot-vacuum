@@ -101,3 +101,49 @@ def test_seed_is_sent_and_dropped_if_the_server_rejects_it(course_server):
         assert llm.STATE.seed_supported is False and "seed" not in llm.STATE.client.sent[-1]
     finally:
         llm.STATE.seed_supported = True
+
+
+def test_reply_schema_covers_every_action():
+    from bendan.agent.parsing import REPLY_SCHEMA
+    from bendan.world.constants import ACTION_WHITELIST
+    items = REPLY_SCHEMA["properties"]["actions"]["items"]["anyOf"]
+    ops = {items[0]["properties"]["op"]["const"], *items[1]["properties"]["op"]["enum"]}
+    assert ops == ACTION_WHITELIST and items[0]["required"] == ["op", "cm"]
+
+
+def test_structured_output_sends_schema_and_falls_back(course_server):
+    """給 schema → response_format json_schema；伺服器不支援範圍關鍵字 → 拿掉再送（json_schema_lite）；對照組不送。"""
+    from bendan.agent.parsing import REPLY_SCHEMA
+    llm.STATE.client = FakeClient('{"actions": [], "say": "好", "emotion": "普通"}')
+    llm.set_model("qwen2.5:7b")
+    old_bad = set(llm.STATE.bad_formats)
+    try:
+        llm.chat([{"role": "user", "content": "往前"}], schema=REPLY_SCHEMA)
+        rf = llm.STATE.client.sent[-1]["response_format"]
+        assert rf["type"] == "json_schema" and rf["json_schema"]["schema"] == REPLY_SCHEMA
+        assert llm.STATE.last_format == "json_schema"
+
+        class Rejected(Exception):
+            status_code = 400
+        ok_create = llm.STATE.client._create
+
+        def picky(**kw):
+            sch = kw.get("response_format", {}).get("json_schema", {}).get("schema")
+            if sch is not None and "maximum" in str(sch):
+                raise Rejected("unsupported JSON schema feature: maximum")
+            return ok_create(**kw)
+        llm.STATE.client.chat.completions.create = picky
+        llm.chat([{"role": "user", "content": "往前"}], schema=REPLY_SCHEMA)
+        assert llm.STATE.last_format == "json_schema_lite" and "json_schema" in llm.STATE.bad_formats
+        assert "maximum" not in str(llm.STATE.client.sent[-1]["response_format"])
+        with llm.structured_output(False):
+            llm.chat([{"role": "user", "content": "往前"}], schema=REPLY_SCHEMA)
+        assert "response_format" not in llm.STATE.client.sent[-1] and llm.STATE.last_format == "plain"
+    finally:
+        llm.STATE.bad_formats = old_bad
+
+
+def test_agent_records_the_output_format():
+    from bendan.agent import Agent
+    from bendan.world import Game
+    assert Agent("silly").think(Game(1), "往前")["format"] == "fake"

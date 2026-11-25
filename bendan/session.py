@@ -413,7 +413,7 @@ class Session:
             "events": types, "interrupted": interrupted, "replaced": replaced,
             "forbidden_violation": "entered_forbidden" in types,
             "quirk": r.get("quirk"), "forgot": r.get("forgot", False), "llm_actions": r.get("llm_actions"),
-            "flavor": r.get("flavor"), "temperature": r.get("temperature"),
+            "flavor": r.get("flavor"), "temperature": r.get("temperature"), "format": r.get("format"),
         })
         entry = cur.get("entry")
         if entry is not None:

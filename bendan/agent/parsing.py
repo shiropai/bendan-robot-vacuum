@@ -7,7 +7,7 @@ import math
 import re
 
 from ..world.constants import ACTION_WHITELIST, MAX_ACTIONS, MAX_FORWARD
-from ..world.units import cells_from_cm
+from ..world.units import CELL_CM, cells_from_cm
 from .prompts import EMOTIONS
 
 
@@ -68,6 +68,28 @@ def extract_json(text):
     if s == -1 or e <= s:
         raise ValueError("找不到 JSON 物件")
     return json.loads(t[s:e + 1])
+
+
+def reply_schema():
+    """回覆格式的 JSON Schema，給 vLLM 的結構化輸出（response_format json_schema）用。
+
+    伺服器照這個 schema 限制模型每一個字（guided decoding）：一定是合法 JSON、op 只能是 9 種動作、forward 一定帶 cm。
+    數值範圍、動作數量上限也寫進去；伺服器不支援這些關鍵字時，llm.chat 會拿掉再試（見 llm/client.py）。
+    轉幾次、吸幾次的 n 刻意不放：要轉兩次就給兩個 turn_right，格式最單純。程式這邊照樣用 validate_output 再驗一次。
+    """
+    simple = sorted(ACTION_WHITELIST - {"forward"})
+    forward = {"type": "object", "additionalProperties": False, "required": ["op", "cm"],
+               "properties": {"op": {"const": "forward"},
+                              "cm": {"type": "integer", "minimum": 1, "maximum": MAX_FORWARD * CELL_CM}}}
+    other = {"type": "object", "additionalProperties": False, "required": ["op"],
+             "properties": {"op": {"enum": simple}}}
+    return {"type": "object", "additionalProperties": False, "required": ["actions", "say", "emotion"],
+            "properties": {"actions": {"type": "array", "maxItems": MAX_ACTIONS, "items": {"anyOf": [forward, other]}},
+                           "say": {"type": "string"},
+                           "emotion": {"enum": list(EMOTIONS)}}}
+
+
+REPLY_SCHEMA = reply_schema()
 
 
 def validate_output(obj):
