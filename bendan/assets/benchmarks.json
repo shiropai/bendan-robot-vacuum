@@ -1,5 +1,5 @@
 {
- "date": "2026-11-20 02:59",
+ "date": "2026-11-25 16:13",
  "server": "課程 JupyterHub（vLLM）",
  "note": "賣蠢模式；指令測試 30 句＋記憶 6 句；腳本玩家（偷懶＋精準）每關各 1 局",
  "models": [
@@ -8,11 +8,11 @@
    "label": "Qwen2.5 7B",
    "eval": {
     "n": 30,
-    "format_rate": 0.9444444444444444,
-    "follow_rate": 0.7,
+    "format_rate": 1.0,
+    "follow_rate": 0.7666666666666667,
     "memory_violation_rate": 0.8333333333333334,
-    "latency_avg": 1.2167525036105264,
-    "latency_p50": 1.1452780859544873
+    "latency_avg": 1.156167422214316,
+    "latency_p50": 1.1104976872447878
    },
    "play": {
     "levels": [
@@ -31,7 +31,7 @@
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 4,
       "quirks": 0,
       "collisions": 0,
@@ -42,99 +42,99 @@
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 4,
       "quirks": 0,
       "collisions": 0,
-      "seconds": 6.6
+      "seconds": 6.7
      },
      {
       "level": 1,
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 6,
+      "failed": "",
+      "n_commands": 7,
       "quirks": 0,
       "collisions": 0,
-      "seconds": 9.9
+      "seconds": 12.7
      },
      {
       "level": 1,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
+      "n_commands": 7,
+      "quirks": 0,
+      "collisions": 0,
+      "seconds": 11.8
+     },
+     {
+      "level": 2,
+      "strategy": "lazy",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 9,
+      "quirks": 0,
+      "collisions": 0,
+      "seconds": 16.0
+     },
+     {
+      "level": 2,
+      "strategy": "precise",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
       "n_commands": 6,
       "quirks": 0,
       "collisions": 0,
       "seconds": 11.4
      },
      {
-      "level": 2,
-      "strategy": "lazy",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 6,
-      "quirks": 0,
-      "collisions": 0,
-      "seconds": 10.2
-     },
-     {
-      "level": 2,
-      "strategy": "precise",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 8,
-      "quirks": 0,
-      "collisions": 0,
-      "seconds": 14.7
-     },
-     {
       "level": 3,
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 12,
+      "failed": "",
+      "n_commands": 13,
       "quirks": 1,
       "collisions": 2,
-      "seconds": 29.6
+      "seconds": 30.4
      },
      {
       "level": 3,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 11,
       "quirks": 1,
       "collisions": 0,
-      "seconds": 21.4
+      "seconds": 20.7
      },
      {
       "level": 4,
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 18,
-      "quirks": 2,
-      "collisions": 3,
-      "seconds": 38.9
+      "failed": "",
+      "n_commands": 13,
+      "quirks": 1,
+      "collisions": 0,
+      "seconds": 22.7
      },
      {
       "level": 4,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 12,
       "quirks": 1,
       "collisions": 1,
-      "seconds": 22.6
+      "seconds": 23.0
      },
      {
       "level": 5,
@@ -145,18 +145,18 @@
       "n_commands": 23,
       "quirks": 1,
       "collisions": 2,
-      "seconds": 41.4
+      "seconds": 47.2
      },
      {
       "level": 5,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 27,
+      "failed": "",
+      "n_commands": 26,
       "quirks": 1,
       "collisions": 0,
-      "seconds": 49
+      "seconds": 54.7
      },
      {
       "level": 6,
@@ -166,46 +166,46 @@
       "failed": "time_up",
       "n_commands": 18,
       "quirks": 3,
-      "collisions": 1,
-      "seconds": 33.7
+      "collisions": 0,
+      "seconds": 28.7
      },
      {
       "level": 6,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 11,
       "quirks": 1,
       "collisions": 1,
-      "seconds": 22
+      "seconds": 19.8
      }
     ],
     "pass_rate": 0.8571428571428571,
     "per_level": {
-     "0": 1,
-     "1": 1,
-     "2": 1,
-     "3": 1,
-     "4": 1,
+     "0": 1.0,
+     "1": 1.0,
+     "2": 1.0,
+     "3": 1.0,
+     "4": 1.0,
      "5": 0.5,
      "6": 0.5
     },
-    "avg_commands": 11.857142857142858,
+    "avg_commands": 11.714285714285714,
     "explosions": 0
    },
-   "minutes": 6.0
+   "minutes": 5.9
   },
   {
    "model": "llama3.1:8b",
    "label": "Llama 3.1 8B",
    "eval": {
     "n": 30,
-    "format_rate": 0.9722222222222222,
+    "format_rate": 1.0,
     "follow_rate": 0.5333333333333333,
-    "memory_violation_rate": 0.6666666666666666,
-    "latency_avg": 1.1703245535415288,
-    "latency_p50": 1.1219744754489511
+    "memory_violation_rate": 0.8333333333333334,
+    "latency_avg": 1.1191176266099017,
+    "latency_p50": 1.067399773048237
    },
    "play": {
     "levels": [
@@ -224,132 +224,132 @@
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 5,
+      "failed": "",
+      "n_commands": 11,
       "quirks": 0,
-      "collisions": 1,
-      "seconds": 8.2
+      "collisions": 7,
+      "seconds": 21.0
      },
      {
       "level": 0,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 4,
       "quirks": 0,
       "collisions": 0,
-      "seconds": 6.3
+      "seconds": 6.4
      },
      {
       "level": 1,
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 6,
+      "failed": "",
+      "n_commands": 11,
       "quirks": 0,
-      "collisions": 0,
-      "seconds": 10.5
+      "collisions": 1,
+      "seconds": 18.2
      },
      {
       "level": 1,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 6,
       "quirks": 0,
       "collisions": 0,
-      "seconds": 10.6
+      "seconds": 10.7
      },
      {
       "level": 2,
       "strategy": "lazy",
       "run": 0,
-      "cleared": false,
-      "failed": "owner_faint",
-      "n_commands": 13,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 7,
       "quirks": 0,
-      "collisions": 6,
-      "seconds": 24.4
+      "collisions": 0,
+      "seconds": 14.4
      },
      {
       "level": 2,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 6,
       "quirks": 0,
       "collisions": 0,
-      "seconds": 11.1
+      "seconds": 11.4
      },
      {
       "level": 3,
       "strategy": "lazy",
       "run": 0,
-      "cleared": false,
-      "failed": "time_up",
-      "n_commands": 14,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 12,
       "quirks": 1,
-      "collisions": 5,
-      "seconds": 29.8
+      "collisions": 3,
+      "seconds": 26.8
      },
      {
       "level": 3,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 10,
       "quirks": 1,
       "collisions": 0,
-      "seconds": 24.4
+      "seconds": 21.7
      },
      {
       "level": 4,
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 14,
+      "failed": "",
+      "n_commands": 11,
       "quirks": 1,
       "collisions": 3,
-      "seconds": 27.2
+      "seconds": 21.4
      },
      {
       "level": 4,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 12,
       "quirks": 1,
-      "collisions": 2,
-      "seconds": 22.8
+      "collisions": 3,
+      "seconds": 23.7
      },
      {
       "level": 5,
       "strategy": "lazy",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 24,
+      "quirks": 1,
+      "collisions": 2,
+      "seconds": 42.9
+     },
+     {
+      "level": 5,
+      "strategy": "precise",
       "run": 0,
       "cleared": false,
       "failed": "out_of_battery",
-      "n_commands": 15,
+      "n_commands": 16,
       "quirks": 1,
-      "collisions": 0,
-      "seconds": 24.6
-     },
-     {
-      "level": 5,
-      "strategy": "precise",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 26,
-      "quirks": 1,
-      "collisions": 0,
-      "seconds": 51.4
+      "collisions": 1,
+      "seconds": 30.1
      },
      {
       "level": 6,
@@ -357,37 +357,37 @@
       "run": 0,
       "cleared": false,
       "failed": "owner_faint",
-      "n_commands": 11,
-      "quirks": 3,
-      "collisions": 5,
-      "seconds": 20.9
+      "n_commands": 12,
+      "quirks": 2,
+      "collisions": 4,
+      "seconds": 20.5
      },
      {
       "level": 6,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 11,
-      "quirks": 1,
-      "collisions": 1,
-      "seconds": 21.5
+      "failed": "",
+      "n_commands": 17,
+      "quirks": 2,
+      "collisions": 2,
+      "seconds": 32.4
      }
     ],
-    "pass_rate": 0.7142857142857143,
+    "pass_rate": 0.8571428571428571,
     "per_level": {
-     "0": 1,
-     "1": 1,
-     "2": 0.5,
-     "3": 0.5,
-     "4": 1,
+     "0": 1.0,
+     "1": 1.0,
+     "2": 1.0,
+     "3": 1.0,
+     "4": 1.0,
      "5": 0.5,
      "6": 0.5
     },
-    "avg_commands": 10.928571428571429,
+    "avg_commands": 11.357142857142858,
     "explosions": 0
    },
-   "minutes": 5.6
+   "minutes": 5.7
   },
   {
    "model": "qwen3-14b",
@@ -395,10 +395,10 @@
    "eval": {
     "n": 30,
     "format_rate": 1.0,
-    "follow_rate": 0.8,
-    "memory_violation_rate": 0.8333333333333334,
-    "latency_avg": 1.7655458892307554,
-    "latency_p50": 1.7569703657645732
+    "follow_rate": 0.7666666666666667,
+    "memory_violation_rate": 0.6666666666666666,
+    "latency_avg": 1.6473397355164505,
+    "latency_p50": 1.5712942155078053
    },
    "play": {
     "levels": [
@@ -417,110 +417,110 @@
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 4,
       "quirks": 0,
       "collisions": 0,
-      "seconds": 8.8
+      "seconds": 8.4
      },
      {
       "level": 0,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 4,
       "quirks": 0,
       "collisions": 0,
-      "seconds": 9.6
+      "seconds": 9.4
      },
      {
       "level": 1,
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
+      "n_commands": 8,
+      "quirks": 0,
+      "collisions": 1,
+      "seconds": 22.2
+     },
+     {
+      "level": 1,
+      "strategy": "precise",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 6,
+      "quirks": 0,
+      "collisions": 0,
+      "seconds": 14.7
+     },
+     {
+      "level": 2,
+      "strategy": "lazy",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 6,
+      "quirks": 0,
+      "collisions": 0,
+      "seconds": 15.0
+     },
+     {
+      "level": 2,
+      "strategy": "precise",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 6,
+      "quirks": 0,
+      "collisions": 0,
+      "seconds": 16.0
+     },
+     {
+      "level": 3,
+      "strategy": "lazy",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
       "n_commands": 10,
-      "quirks": 0,
-      "collisions": 0,
-      "seconds": 22.4
-     },
-     {
-      "level": 1,
-      "strategy": "precise",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 6,
-      "quirks": 0,
-      "collisions": 0,
-      "seconds": 15.3
-     },
-     {
-      "level": 2,
-      "strategy": "lazy",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 8,
-      "quirks": 0,
-      "collisions": 0,
-      "seconds": 22.3
-     },
-     {
-      "level": 2,
-      "strategy": "precise",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 6,
-      "quirks": 0,
-      "collisions": 0,
-      "seconds": 16.4
-     },
-     {
-      "level": 3,
-      "strategy": "lazy",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 11,
       "quirks": 1,
-      "collisions": 3,
-      "seconds": 48.8
+      "collisions": 0,
+      "seconds": 33.9
      },
      {
       "level": 3,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 11,
       "quirks": 1,
       "collisions": 0,
-      "seconds": 32.4
+      "seconds": 31.6
      },
      {
       "level": 4,
       "strategy": "lazy",
       "run": 0,
       "cleared": true,
-      "failed": null,
-      "n_commands": 8,
-      "quirks": 0,
-      "collisions": 0,
-      "seconds": 27.1
-     },
-     {
-      "level": 4,
-      "strategy": "precise",
-      "run": 0,
-      "cleared": true,
-      "failed": null,
-      "n_commands": 12,
+      "failed": "",
+      "n_commands": 13,
       "quirks": 1,
       "collisions": 1,
-      "seconds": 31.4
+      "seconds": 33.6
+     },
+     {
+      "level": 4,
+      "strategy": "precise",
+      "run": 0,
+      "cleared": true,
+      "failed": "",
+      "n_commands": 12,
+      "quirks": 1,
+      "collisions": 2,
+      "seconds": 37.1
      },
      {
       "level": 5,
@@ -530,57 +530,57 @@
       "failed": "time_up",
       "n_commands": 27,
       "quirks": 1,
-      "collisions": 2,
-      "seconds": 73.3
+      "collisions": 1,
+      "seconds": 73.2
      },
      {
       "level": 5,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 26,
       "quirks": 1,
       "collisions": 0,
-      "seconds": 68.4
+      "seconds": 69.5
      },
      {
       "level": 6,
       "strategy": "lazy",
       "run": 0,
       "cleared": false,
-      "failed": "time_up",
-      "n_commands": 18,
-      "quirks": 3,
+      "failed": "owner_faint",
+      "n_commands": 5,
+      "quirks": 1,
       "collisions": 5,
-      "seconds": 52
+      "seconds": 30.5
      },
      {
       "level": 6,
       "strategy": "precise",
       "run": 0,
       "cleared": true,
-      "failed": null,
+      "failed": "",
       "n_commands": 16,
       "quirks": 2,
-      "collisions": 1,
-      "seconds": 39.1
+      "collisions": 0,
+      "seconds": 38.6
      }
     ],
     "pass_rate": 0.8571428571428571,
     "per_level": {
-     "0": 1,
-     "1": 1,
-     "2": 1,
-     "3": 1,
-     "4": 1,
+     "0": 1.0,
+     "1": 1.0,
+     "2": 1.0,
+     "3": 1.0,
+     "4": 1.0,
      "5": 0.5,
      "6": 0.5
     },
-    "avg_commands": 11.928571428571429,
+    "avg_commands": 11,
     "explosions": 0
    },
-   "minutes": 8.9
+   "minutes": 8.2
   }
  ]
 }

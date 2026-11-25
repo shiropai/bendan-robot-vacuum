@@ -61,6 +61,9 @@
 | 2. 程式護欄 | `agent/guardrail.py` | 在複製的世界模擬計畫，會闖禁區就在前一步截斷 | 實測 7B 模型 67–83% 的計畫無視禁區；`Session(guardrail=True)` 或遊戲中 `/guard` 開啟 |
 | 3. 遊戲規則 | `world/game.py`、`gameplay/` | 碰撞、電量、血壓、指令上限、步數上限 | 世界本身的物理與勝負 |
 
+第 0 層實測（2026-11-25，課程 JupyterHub）：三個課程模型都直接接受完整的 schema，沒有退回；
+qwen2.5:7b 的格式正確率 94% → 100%，照做率和延遲不變。完整比較見 [evaluation_results.md](evaluation_results.md#5輸出格式純-prompt-vs-json_schemav922026-11-25)。
+
 > 注意方向相反的設計：護欄是**程式幫 LLM 把關**（讓 Agent 更可靠）；恍神是**程式故意讓計畫出錯**（讓遊戲更難）。
 > 兩者都在 `session.apply` 裡、LLM 之後、引擎之前，所以評估（`gameplay=False`）完全不受恍神影響。
 
